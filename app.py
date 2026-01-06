@@ -74,7 +74,7 @@ def login_page():
     with col2:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown('<p class="big-font">让学术写作更简单</p>', unsafe_allow_html=True)
-        st.markdown('<p class="sub-font">DeepSeek V3 强力驱动 · 专攻 AIGC 检测 · 深度去痕</p>', unsafe_allow_html=True)
+        st.markdown('<p class="sub-font"> 强力降重 · 专攻 AIGC 检测 · 深度去AI</p>', unsafe_allow_html=True)
         
         tab1, tab2 = st.tabs(["🔐 账号登录", "🆕 快速注册"])
         
