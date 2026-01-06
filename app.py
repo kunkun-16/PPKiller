@@ -53,79 +53,47 @@ def sync_user_to_cloud(updated_df):
 
 # --- 4. 登录与注册功能 (已适配云端) ---
 def login_page():
-    st.title("📄 Paper Killer - 让写作更简单")
-
-    # 1. 侧边栏：登录/注册切换
-    # 这一步是为了防止页面刷新后状态丢失
-    if 'auth_mode' not in st.session_state:
-        st.session_state.auth_mode = 'login'
-
-    # 使用 Tab 标签页来切换，体验更好
-    tab1, tab2 = st.tabs(["🔐 登录账号", "📝 快速注册"])
-
-    # --- 登录部分 ---
-    with tab1:
-        username = st.text_input("用户名", key="login_user")
-        password = st.text_input("密码", type="password", key="login_pass")
+    col1, col2 = st.columns([1.2, 1])
+    with col1:
+        st.image("https://img.freepik.com/free-vector/blogging-concept-illustration_114360-1038.jpg", width=500)
+    
+    with col2:
+        st.title("让学术写作更简单")
+        tab1, tab2 = st.tabs(["🔐 账号登录", "🆕 快速注册"])
         
-        if st.button("🚀 立即登录", use_container_width=True):
-            if not username or not password:
-                st.warning("账号密码不能为空！")
-                return
+        df = load_users() # 预加载数据
 
-            try:
-                # 加载最新的用户数据
-                df = load_users()
-                
-                # 清理输入内容的空格
-                u = username.strip()
-                p = password.strip()
-
-                # 比对查找
-                user_match = df[(df['username'] == u) & (df['password'] == p)]
-
+        with tab1:
+            u = st.text_input("用户名", key="l_user")
+            p = st.text_input("密码", type="password", key="l_pass")
+            if st.button("立即登录", type="primary", use_container_width=True):
+                # 匹配账号密码
+                user_match = df[(df['username'].astype(str) == u) & (df['password'].astype(str) == p)]
                 if not user_match.empty:
-                    # 登录成功！保存状态
-                    st.session_state['logged_in'] = True
-                    st.session_state['username'] = u
-                    st.session_state['balance'] = float(user_match.iloc[0]['balance'])
-                    st.success("登录成功！正在跳转...")
+                    st.session_state.logged_in = True
+                    st.session_state.username = u
+                    # 获取当前用户的余额
+                    st.session_state.balance = int(user_match.iloc[0]['balance'])
+                    st.success("登录成功！")
+                    time.sleep(0.5)
                     st.rerun()
                 else:
-                    st.error("❌ 用户名或密码错误")
-            
-            except Exception as e:
-                st.error(f"连接数据库失败: {e}")
+                    st.error("账号或密码错误")
 
-    # --- 注册部分 ---
-    with tab2:
-        new_user = st.text_input("设置用户名", key="reg_user")
-        new_pass = st.text_input("设置密码", type="password", key="reg_pass")
-        
-        if st.button("✨ 提交注册", use_container_width=True):
-            if not new_user or not new_pass:
-                st.warning("请填写完整信息")
-                return
-                
-            try:
-                df = load_users()
-                if new_user in df['username'].values:
-                    st.error("该用户名已被占用")
+        with tab2:
+            reg_u = st.text_input("设置用户名", key="r_user")
+            reg_p = st.text_input("设置密码", type="password", key="r_pass")
+            if st.button("提交注册", use_container_width=True):
+                if reg_u in df['username'].astype(str).values:
+                    st.error("用户名已存在")
+                elif not reg_u or not reg_p:
+                    st.warning("请填写完整")
                 else:
-                    # 创建新用户数据（送 200 字）
-                    new_row = pd.DataFrame([{
-                        "username": new_user, 
-                        "password": new_pass, 
-                        "balance": 200
-                    }])
-                    # 合并并上传
+                    # 将新用户拼接到现有数据中
+                    new_row = pd.DataFrame([{"username": reg_u, "password": reg_p, "balance": 200}])
                     updated_df = pd.concat([df, new_row], ignore_index=True)
                     sync_user_to_cloud(updated_df)
-                    
-                    st.success("注册成功！请切换到登录页登录。")
-                    st.balloons()
-            except Exception as e:
-                st.error(f"注册失败: {e}")
+                    st.success("注册成功！送200字，请切换到登录页。")
 
 # --- 5. 主程序 (降重工作台) ---
 def main_app():
@@ -147,7 +115,7 @@ def main_app():
         st.caption("提示：如需充值请联系管理员手动修改余额")
 
     # 主界面
-    st.header("📝AI杀手")
+    st.header("📝一键降重")
     col_in, col_out = st.columns(2)
 
     with col_in:
@@ -155,10 +123,10 @@ def main_app():
         word_count = len(text)
         can_run = word_count > 0 and word_count <= current_balance
         
-        if st.button("🚀 开始kill...降重", type="primary", disabled=not can_run, use_container_width=True):
+        if st.button("🚀 开始降重", type="primary", disabled=not can_run, use_container_width=True):
             with col_out:
                 msg = st.empty()
-                msg.info("正在挥汗改作业...")
+                msg.info("正在挥汗作业ing...")
                 try:
                     client = OpenAI(api_key=SYSTEM_API_KEY, base_url="https://api.deepseek.com")
                     resp = client.chat.completions.create(
