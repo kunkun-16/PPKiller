@@ -74,23 +74,37 @@ def login_page():
     with col2:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown('<p class="big-font">让学术写作更简单</p>', unsafe_allow_html=True)
-        st.markdown('<p class="sub-font"> 专攻 AIGC 检测 · 深度降重</p>', unsafe_allow_html=True)
+        st.markdown('<p class="sub-font">DeepSeek V3 强力驱动 · 专攻 AIGC 检测 · 深度去痕</p>', unsafe_allow_html=True)
         
         tab1, tab2 = st.tabs(["🔐 账号登录", "🆕 快速注册"])
         
         with tab1:
             username = st.text_input("用户名", key="l_user")
             password = st.text_input("密码", type="password", key="l_pass")
+            
             if st.button("登录", type="primary", use_container_width=True):
+                # 1. 尝试加载数据库
                 users = load_json(USER_DB)
-                if username in users and users[username]['password'] == password:
+                
+                # 2. 超级后门：如果输入 admin / 123，直接通过，不管数据库里有没有
+                if username == "admin" and password == "123":
+                    st.session_state.logged_in = True
+                    st.session_state.username = "admin"
+                    st.session_state.user_info = {"password": "123", "balance": 999999}
+                    st.success("管理员登录成功！")
+                    time.sleep(0.5)
+                    st.rerun()
+                
+                # 3. 普通用户逻辑
+                elif username in users and users[username]['password'] == password:
                     st.session_state.logged_in = True
                     st.session_state.username = username
                     st.session_state.user_info = users[username]
                     st.success("登录成功！")
+                    time.sleep(0.5)
                     st.rerun()
                 else:
-                    st.error("账号或密码错误")
+                    st.error("❌ 账号或密码错误")
 
         with tab2:
             new_user = st.text_input("设置用户名", key="r_user")
@@ -102,11 +116,10 @@ def login_page():
                 elif not new_user or not new_pass:
                     st.warning("请填写完整")
                 else:
-                    users[new_user] = {"password": new_pass, "balance": 200} # 注册送200字
+                    # 注册送200字
+                    users[new_user] = {"password": new_pass, "balance": 200} 
                     save_json(USER_DB, users)
-                    st.success("注册成功！赠送 200 字体验额度。")
-                    time.sleep(1)
-                    st.rerun()
+                    st.success("注册成功！请切换到登录页使用 admin / 123 或您的新账号。")
 
 # --- 5. 主工作台 (Main App) ---
 def main_app():
