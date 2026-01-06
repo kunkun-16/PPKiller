@@ -58,7 +58,7 @@ def login_page():
         st.image("https://img.freepik.com/free-vector/blogging-concept-illustration_114360-1038.jpg", width=500)
     
     with col2:
-        st.title("让学术写作更简单")
+        st.title("作业狗，让作业更简单")
         tab1, tab2 = st.tabs(["🔐 账号登录", "🆕 快速注册"])
         
         df = load_users() # 预加载数据
