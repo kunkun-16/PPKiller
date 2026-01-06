@@ -115,15 +115,15 @@ def main_app():
         st.caption("提示：如需充值请联系管理员手动修改余额")
 
     # 主界面
-    st.header("📝一键降重")
+    st.header("📝作业狗降重")
     col_in, col_out = st.columns(2)
 
     with col_in:
-        text = st.text_area("输入作业原文", height=400)
+        text = st.text_area("输入作业", height=400)
         word_count = len(text)
         can_run = word_count > 0 and word_count <= current_balance
         
-        if st.button("🚀 开始降重", type="primary", disabled=not can_run, use_container_width=True):
+        if st.button("🚀 一键降重", type="primary", disabled=not can_run, use_container_width=True):
             with col_out:
                 msg = st.empty()
                 msg.info("正在挥汗作业ing...")
