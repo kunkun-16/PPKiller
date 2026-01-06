@@ -53,47 +53,65 @@ def sync_user_to_cloud(updated_df):
 
 # --- 4. 登录与注册功能 (已适配云端) ---
 def login_page():
-    col1, col2 = st.columns([1.2, 1])
-    with col1:
-        st.image("https://img.freepik.com/free-vector/blogging-concept-illustration_114360-1038.jpg", width=500)
+    st.title("🔍 登录故障诊断模式")
     
-    with col2:
-        st.title("让学术写作更简单")
-        tab1, tab2 = st.tabs(["🔐 账号登录", "🆕 快速注册"])
-        
-        df = load_users() # 预加载数据
+    # 1. 尝试读取数据
+    try:
+        df = load_users()
+        st.success("✅ 数据库连接成功！已读取到数据。")
+    except Exception as e:
+        st.error(f"❌ 严重错误：数据库完全读不出来。\n原因：{e}")
+        st.stop()
 
-        with tab1:
-            u = st.text_input("用户名", key="l_user")
-            p = st.text_input("密码", type="password", key="l_pass")
-            if st.button("立即登录", type="primary", use_container_width=True):
-                # 匹配账号密码
-                user_match = df[(df['username'].astype(str) == u) & (df['password'].astype(str) == p)]
-                if not user_match.empty:
-                    st.session_state.logged_in = True
-                    st.session_state.username = u
-                    # 获取当前用户的余额
-                    st.session_state.balance = int(user_match.iloc[0]['balance'])
-                    st.success("登录成功！")
-                    time.sleep(0.5)
+    # 2. 【核心诊断】把程序看到的数据直接打印出来
+    st.warning("👇 只有看清下面这三点，才能找到登不进去的原因：")
+    
+    st.write("1. 表头也就是列名 (Columns)：")
+    st.write(df.columns.tolist()) 
+    # ⚠️ 检查：是不是叫 'username ' (后面带空格)？或者 'User Name'？代码里必须一模一样！
+
+    st.write("2. 前两行真实数据 (Data)：")
+    st.dataframe(df.head(2))
+    # ⚠️ 检查：这里面有你的账号吗？如果全是空的，说明 sheet 没选对。
+
+    st.write("3. 数据类型 (Types)：")
+    st.write(df.dtypes)
+    # ⚠️ 检查：username 和 password 必须是 object (也就是字符串)。
+
+    st.divider() # 分割线
+
+    # 3. 原来的登录界面
+    with st.tabs(["登录", "注册"]):
+        st.header("请尝试登录")
+        username = st.text_input("用户名")
+        password = st.text_input("密码", type="password")
+
+        if st.button("登录"):
+            # 4. 【比对诊断】看看输入的账号和表格里的到底哪里不一样
+            # 清理一下输入（去空格）
+            u = username.strip()
+            p = password.strip()
+            
+            st.info(f"正在匹配用户: '{u}'，密码: '{p}'")
+            
+            # 在表格里找这一行
+            user_match = df[df['username'] == u]
+            
+            if user_match.empty:
+                st.error("❌ 找不到用户名！(请对比上面显示的真实数据)")
+            else:
+                # 如果用户名找到了，检查密码
+                real_password = str(user_match.iloc[0]['password']).strip()
+                st.write(f"🔍 找到用户了，表格里的真实密码是: '{real_password}'")
+                
+                if real_password == p:
+                    st.success("✅ 密码匹配成功！(登录逻辑通了)")
+                    st.session_state['logged_in'] = True
+                    st.session_state['username'] = u
+                    st.session_state['balance'] = user_match.iloc[0]['balance']
                     st.rerun()
                 else:
-                    st.error("账号或密码错误")
-
-        with tab2:
-            reg_u = st.text_input("设置用户名", key="r_user")
-            reg_p = st.text_input("设置密码", type="password", key="r_pass")
-            if st.button("提交注册", use_container_width=True):
-                if reg_u in df['username'].astype(str).values:
-                    st.error("用户名已存在")
-                elif not reg_u or not reg_p:
-                    st.warning("请填写完整")
-                else:
-                    # 将新用户拼接到现有数据中
-                    new_row = pd.DataFrame([{"username": reg_u, "password": reg_p, "balance": 200}])
-                    updated_df = pd.concat([df, new_row], ignore_index=True)
-                    sync_user_to_cloud(updated_df)
-                    st.success("注册成功！送200字，请切换到登录页。")
+                    st.error(f"❌ 密码错误！你输入的是 '{p}'，但表格里记的是 '{real_password}'")
 
 # --- 5. 主程序 (降重工作台) ---
 def main_app():
