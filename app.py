@@ -24,10 +24,11 @@ def get_db_connection():
     return st.connection("gsheets", type=GSheetsConnection)
 
 def load_users():
-    conn = get_db_connection()
-    # 尝试：删掉 worksheet="Sheet1" 这个参数，只留 URL
-    # 这会强制插件使用最简单的逻辑读取第一个标签页
-    return conn.read(spreadsheet=SHEET_URL, ttl=0)
+    # 将链接转换为直接下载 CSV 的格式
+    csv_url = SHEET_URL.replace('/edit?usp=sharing', '/export?format=csv')
+    # 绕过插件，直接读取
+    df = pd.read_csv(csv_url)
+    return df
 
 def sync_user_to_cloud(updated_df):
     """将修改后的数据写回云端"""
@@ -135,5 +136,4 @@ if 'logged_in' not in st.session_state:
 if st.session_state.logged_in:
     main_app()
 else:
-
     login_page()
