@@ -1,6 +1,6 @@
 import streamlit as st
 from openai import OpenAI
-from streamlit_gsheets import GSheetConnection
+from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import time
 
@@ -21,7 +21,7 @@ SYSTEM_API_KEY = "sk-8b582db9fd144de4935b1957db1deb2e"
 # --- 3. 数据库连接工具 ---
 def get_db_connection():
     """建立与 Google Sheets 的连接"""
-    return st.connection("gsheets", type=GSheetConnection)
+    return st.connection("gsheets", type=GSheetsConnection)
 
 def load_users():
     """从云端表格读取所有用户"""
