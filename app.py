@@ -24,10 +24,10 @@ def get_db_connection():
     return st.connection("gsheets", type=GSheetsConnection)
 
 def load_users():
-    """从云端表格读取所有用户"""
     conn = get_db_connection()
-    # ttl=0 保证每次点击按钮都读取最新数据，防止余额显示延迟
-    return conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0)
+    # 尝试：删掉 worksheet="Sheet1" 这个参数，只留 URL
+    # 这会强制插件使用最简单的逻辑读取第一个标签页
+    return conn.read(spreadsheet=SHEET_URL, ttl=0)
 
 def sync_user_to_cloud(updated_df):
     """将修改后的数据写回云端"""
@@ -135,4 +135,5 @@ if 'logged_in' not in st.session_state:
 if st.session_state.logged_in:
     main_app()
 else:
+
     login_page()
