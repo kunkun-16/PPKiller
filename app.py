@@ -6,7 +6,7 @@ import time
 
 # --- 1. 全局页面配置 ---
 st.set_page_config(
-    page_title="写作狗AI降重 - 2026专业版",
+    page_title="作业狗AI降重 - 2026专业版",
     page_icon="🐶",
     layout="wide"
 )
@@ -30,20 +30,20 @@ def get_db_connection():
 
 def load_users():
     conn = get_db_connection()
-    # 读取数据
     df = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0)
-    
-    # --- 🛠️ 关键修复开始 ---
-    # 1. 把“用户名”和“密码”强制转为字符串 (String)
-    # 这样 "123" 就能匹配 123 了
+
+    # 1. 先强制转为字符串
     df['username'] = df['username'].astype(str)
     df['password'] = df['password'].astype(str)
-    
-    # 2. 把“余额”强制转为数字 (Numeric)
-    # 防止表格里有空格导致扣费计算报错，errors='coerce' 会把非数字变成 NaN
+
+    # 2. 【核心修复】去掉讨厌的 ".0"
+    # 正则表达式的意思是：如果字符串结尾是 .0，就把它删掉
+    df['username'] = df['username'].str.replace(r'\.0$', '', regex=True)
+    df['password'] = df['password'].str.replace(r'\.0$', '', regex=True)
+
+    # 3. 余额转数字
     df['balance'] = pd.to_numeric(df['balance'], errors='coerce').fillna(0)
-    # --- 🛠️ 关键修复结束 ---
-    
+
     return df
 
 def sync_user_to_cloud(updated_df):
@@ -53,65 +53,79 @@ def sync_user_to_cloud(updated_df):
 
 # --- 4. 登录与注册功能 (已适配云端) ---
 def login_page():
-    st.title("🔍 登录故障诊断模式")
-    
-    # 1. 尝试读取数据
-    try:
-        df = load_users()
-        st.success("✅ 数据库连接成功！已读取到数据。")
-    except Exception as e:
-        st.error(f"❌ 严重错误：数据库完全读不出来。\n原因：{e}")
-        st.stop()
+    st.title("📄 Paper Killer - 让写作更简单")
 
-    # 2. 【核心诊断】把程序看到的数据直接打印出来
-    st.warning("👇 只有看清下面这三点，才能找到登不进去的原因：")
-    
-    st.write("1. 表头也就是列名 (Columns)：")
-    st.write(df.columns.tolist()) 
-    # ⚠️ 检查：是不是叫 'username ' (后面带空格)？或者 'User Name'？代码里必须一模一样！
+    # 1. 侧边栏：登录/注册切换
+    # 这一步是为了防止页面刷新后状态丢失
+    if 'auth_mode' not in st.session_state:
+        st.session_state.auth_mode = 'login'
 
-    st.write("2. 前两行真实数据 (Data)：")
-    st.dataframe(df.head(2))
-    # ⚠️ 检查：这里面有你的账号吗？如果全是空的，说明 sheet 没选对。
+    # 使用 Tab 标签页来切换，体验更好
+    tab1, tab2 = st.tabs(["🔐 登录账号", "📝 快速注册"])
 
-    st.write("3. 数据类型 (Types)：")
-    st.write(df.dtypes)
-    # ⚠️ 检查：username 和 password 必须是 object (也就是字符串)。
+    # --- 登录部分 ---
+    with tab1:
+        username = st.text_input("用户名", key="login_user")
+        password = st.text_input("密码", type="password", key="login_pass")
+        
+        if st.button("🚀 立即登录", use_container_width=True):
+            if not username or not password:
+                st.warning("账号密码不能为空！")
+                return
 
-    st.divider() # 分割线
-
-    # 3. 原来的登录界面
-    with st.tabs(["登录", "注册"]):
-        st.header("请尝试登录")
-        username = st.text_input("用户名")
-        password = st.text_input("密码", type="password")
-
-        if st.button("登录"):
-            # 4. 【比对诊断】看看输入的账号和表格里的到底哪里不一样
-            # 清理一下输入（去空格）
-            u = username.strip()
-            p = password.strip()
-            
-            st.info(f"正在匹配用户: '{u}'，密码: '{p}'")
-            
-            # 在表格里找这一行
-            user_match = df[df['username'] == u]
-            
-            if user_match.empty:
-                st.error("❌ 找不到用户名！(请对比上面显示的真实数据)")
-            else:
-                # 如果用户名找到了，检查密码
-                real_password = str(user_match.iloc[0]['password']).strip()
-                st.write(f"🔍 找到用户了，表格里的真实密码是: '{real_password}'")
+            try:
+                # 加载最新的用户数据
+                df = load_users()
                 
-                if real_password == p:
-                    st.success("✅ 密码匹配成功！(登录逻辑通了)")
+                # 清理输入内容的空格
+                u = username.strip()
+                p = password.strip()
+
+                # 比对查找
+                user_match = df[(df['username'] == u) & (df['password'] == p)]
+
+                if not user_match.empty:
+                    # 登录成功！保存状态
                     st.session_state['logged_in'] = True
                     st.session_state['username'] = u
-                    st.session_state['balance'] = user_match.iloc[0]['balance']
+                    st.session_state['balance'] = float(user_match.iloc[0]['balance'])
+                    st.success("登录成功！正在跳转...")
                     st.rerun()
                 else:
-                    st.error(f"❌ 密码错误！你输入的是 '{p}'，但表格里记的是 '{real_password}'")
+                    st.error("❌ 用户名或密码错误")
+            
+            except Exception as e:
+                st.error(f"连接数据库失败: {e}")
+
+    # --- 注册部分 ---
+    with tab2:
+        new_user = st.text_input("设置用户名", key="reg_user")
+        new_pass = st.text_input("设置密码", type="password", key="reg_pass")
+        
+        if st.button("✨ 提交注册", use_container_width=True):
+            if not new_user or not new_pass:
+                st.warning("请填写完整信息")
+                return
+                
+            try:
+                df = load_users()
+                if new_user in df['username'].values:
+                    st.error("该用户名已被占用")
+                else:
+                    # 创建新用户数据（送 200 字）
+                    new_row = pd.DataFrame([{
+                        "username": new_user, 
+                        "password": new_pass, 
+                        "balance": 200
+                    }])
+                    # 合并并上传
+                    updated_df = pd.concat([df, new_row], ignore_index=True)
+                    sync_user_to_cloud(updated_df)
+                    
+                    st.success("注册成功！请切换到登录页登录。")
+                    st.balloons()
+            except Exception as e:
+                st.error(f"注册失败: {e}")
 
 # --- 5. 主程序 (降重工作台) ---
 def main_app():
@@ -133,18 +147,18 @@ def main_app():
         st.caption("提示：如需充值请联系管理员手动修改余额")
 
     # 主界面
-    st.header("📝论文降重")
+    st.header("📝AI杀手")
     col_in, col_out = st.columns(2)
 
     with col_in:
-        text = st.text_area("输入论文原文", height=400)
+        text = st.text_area("输入作业原文", height=400)
         word_count = len(text)
         can_run = word_count > 0 and word_count <= current_balance
         
-        if st.button("🚀 开始降重", type="primary", disabled=not can_run, use_container_width=True):
+        if st.button("🚀 开始kill...降重", type="primary", disabled=not can_run, use_container_width=True):
             with col_out:
                 msg = st.empty()
-                msg.info("AI 正在深度重写...")
+                msg.info("正在挥汗改作业...")
                 try:
                     client = OpenAI(api_key=SYSTEM_API_KEY, base_url="https://api.deepseek.com")
                     resp = client.chat.completions.create(
