@@ -30,8 +30,21 @@ def get_db_connection():
 
 def load_users():
     conn = get_db_connection()
-    # 强制指定读取 "Sheet1" (或者你表格左下角显示的那个名字)
-    return conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0)
+    # 读取数据
+    df = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0)
+    
+    # --- 🛠️ 关键修复开始 ---
+    # 1. 把“用户名”和“密码”强制转为字符串 (String)
+    # 这样 "123" 就能匹配 123 了
+    df['username'] = df['username'].astype(str)
+    df['password'] = df['password'].astype(str)
+    
+    # 2. 把“余额”强制转为数字 (Numeric)
+    # 防止表格里有空格导致扣费计算报错，errors='coerce' 会把非数字变成 NaN
+    df['balance'] = pd.to_numeric(df['balance'], errors='coerce').fillna(0)
+    # --- 🛠️ 关键修复结束 ---
+    
+    return df
 
 def sync_user_to_cloud(updated_df):
     conn = get_db_connection()
