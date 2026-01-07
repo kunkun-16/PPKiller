@@ -151,9 +151,8 @@ def login_page():
     
     with col2:
         # 1. 【新增】顶部海报/Logo
-        # 这里用 Dicebear 生成一个可爱的机器人头像作为 Logo，也可以换成你自己的 Banner 图片
-        st.image("https://api.dicebear.com/9.x/bottts-neutral/svg?seed=PaperKillerApp", 
-                 width=120, 
+        st.image("logo.jpg", 
+                 width=150, # 如果觉得图片太大或太小，调整这个数字 (比如改成 300)
                  use_container_width=False) 
         
         # 2. 标题区
