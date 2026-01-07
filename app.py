@@ -152,12 +152,12 @@ def login_page():
     with col2:
         # 1. 【新增】顶部海报/Logo
         st.image("logo.jpg", 
-                 width=150, # 如果觉得图片太大或太小，调整这个数字 (比如改成 300)
+                 width=100, # 如果觉得图片太大或太小，调整这个数字 (比如改成 300)
                  use_container_width=False) 
         
         # 2. 标题区
         st.markdown("<h1 style='text-align: center; color: #333; margin-top: -20px;'>Paper Killer</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #666; font-size: 14px; margin-bottom: 30px;'>✨ 您的二次元 AI 论文降重专家</p>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #666; font-size: 14px; margin-bottom: 30px;'>✨ 作业狗AI降重专家</p>", unsafe_allow_html=True)
         
         # 3. 登录/注册表单
         tab1, tab2 = st.tabs(["🔐 账号登录", "🎁 快速注册"])
