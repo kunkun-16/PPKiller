@@ -149,11 +149,10 @@ def login_page():
     col1, col2, col3 = st.columns([1, 1.2, 1])
     
     with col2:
-        # 1. 【新增】顶部海报/Logo
-        # 这里用 Dicebear 生成一个可爱的机器人头像作为 Logo，也可以换成你自己的 Banner 图片
-        st.image("https://api.dicebear.com/9.x/bottts-neutral/svg?seed=PaperKillerApp", 
-                 width=120, 
-                 use_container_width=False) 
+        # 🔴 改成你的文件名
+        st.image("logo.png", 
+                 width=150, # 本地图片可能需要大一点，可以试着改这个数字
+                 use_container_width=False)
         
         # 2. 标题区
         st.markdown("<h1 style='text-align: center; color: #333; margin-top: -20px;'>Paper Killer</h1>", unsafe_allow_html=True)
