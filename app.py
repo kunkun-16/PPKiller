@@ -151,13 +151,38 @@ def login_page():
     
     with col2:
         # 1. 【新增】顶部海报/Logo
-        st.image("logo.jpg", 
-                 width=100, # 如果觉得图片太大或太小，调整这个数字 (比如改成 300)
-                 use_container_width=False) 
+       with col2:
+        # --- 🔴 删除旧代码，从这里开始替换 ---
         
-        # 2. 标题区
-        st.markdown("<h1 style='text-align: center; color: #333; margin-top: -20px;'>Paper Killer</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #666; font-size: 14px; margin-bottom: 30px;'>✨ 作业狗AI降重专家</p>", unsafe_allow_html=True)
+        # 1. 创建两个子列来实现“水平并排”
+        # 比例 [1.2, 3] 表示左边占 1.2 份宽度，右边占 3 份宽度
+        # gap="small" 让图文靠得近一点
+        head_c1, head_c2 = st.columns([1.2, 3], gap="small")
+        
+        # 2. 左边放图片 (Logo)
+        with head_c1:
+            # 确保文件名和 GitHub 上的一模一样 (注意 .png 后缀)
+            st.image("logo.jpg", width=110, use_container_width=False)
+            
+        # 3. 右边放文字 (标题)
+        with head_c2:
+            # 使用 HTML/CSS 精细控制对齐
+            # padding-top: 15px 是为了让文字下沉，和图片的中心对齐
+            st.markdown("""
+                <div style="padding-top: 15px; text-align: left;">
+                    <h1 style="margin: 0; padding: 0; font-size: 34px; color: #2c3e50; font-weight: 800; line-height: 1.2;">
+                        Paper Killer
+                    </h1>
+                    <p style="margin: 5px 0 0 0; color: #7f8c8d; font-size: 14px;">
+                        ✨作业狗AI降重助手
+                    </p>
+                </div>
+            """, unsafe_allow_html=True)
+            
+        # --- 🟢 替换结束 ---
+        
+        # 下面是原来的 tab 代码，保持不动
+        st.markdown("<br>", unsafe_allow_html=True) # 加个空行隔开
         
         # 3. 登录/注册表单
         tab1, tab2 = st.tabs(["🔐 账号登录", "🎁 快速注册"])
