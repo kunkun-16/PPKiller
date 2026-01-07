@@ -142,22 +142,23 @@ def redeem_code(username, code_input):
         return False, f"系统错误: {e}"
 
 # --- 4. 界面函数：登录页 (带海报版) ---
+# --- 4. 界面函数：登录页 (带海报版) ---
 def login_page():
     set_bg('login')
     
     # 三列布局：1:1.2:1，中间稍微宽一点点
     col1, col2, col3 = st.columns([1, 1.2, 1])
     
-    ith col2:
+    with col2:
         # 1. 【新增】顶部海报/Logo
         # 这里用 Dicebear 生成一个可爱的机器人头像作为 Logo，也可以换成你自己的 Banner 图片
         st.image("https://api.dicebear.com/9.x/bottts-neutral/svg?seed=PaperKillerApp", 
                  width=120, 
-                 use_container_width=False)
+                 use_container_width=False) 
         
         # 2. 标题区
         st.markdown("<h1 style='text-align: center; color: #333; margin-top: -20px;'>Paper Killer</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #666; font-size: 14px; margin-bottom: 30px;'>✨ 作业狗AI论文降重专家</p>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #666; font-size: 14px; margin-bottom: 30px;'>✨ 您的二次元 AI 论文降重专家</p>", unsafe_allow_html=True)
         
         # 3. 登录/注册表单
         tab1, tab2 = st.tabs(["🔐 账号登录", "🎁 快速注册"])
