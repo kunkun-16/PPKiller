@@ -18,51 +18,61 @@ def set_bg(state):
     state: 'login' (显示动漫背景) 或 'main' (显示纯白背景)
     """
     if state == 'login':
-        # 这里使用了一张高清的初音未来/二次元风景图，你也可以换成自己的图片链接
-        bg_url = "https://w.wallhaven.cc/full/wq/wallhaven-wqery7.jpg" 
+        # 1. 换用 Unsplash 稳定图源 (新海诚风格云朵/风景)
+        # 如果你想换图，只需把下面的链接换成你自己的图片链接即可
+        bg_url = "https://images.unsplash.com/photo-1493246507139-91e8fad9978e?ixlib=rb-4.0.3&q=85&fm=jpg&crop=entropy&cs=srgb&w=1920"
         
         css = f"""
         <style>
-            /* 1. 全局背景控制：强制覆盖整个窗口 */
-            [data-testid="stAppViewContainer"] {{
-                background-image: url("{bg_url}");
-                background-size: cover;
-                background-position: center;
-                background-repeat: no-repeat;
-                background-attachment: fixed;
+            /* 1. 强制覆盖全屏背景 */
+            .stApp {{
+                background-image: url("{bg_url}") !important;
+                background-size: cover !important;
+                background-position: center center !important;
+                background-repeat: no-repeat !important;
+                background-attachment: fixed !important;
             }}
             
-            /* 2. 顶部Header透明化：去掉Streamlit默认的白条 */
-            [data-testid="stHeader"] {{
-                background-color: rgba(0,0,0,0);
+            /* 2. 顶部Header透明化 */
+            header[data-testid="stHeader"] {{
+                background-color: rgba(0,0,0,0) !important;
+                z-index: 1; /* 保证不遮挡背景 */
             }}
             
-            /* 3. 登录卡片样式：玻璃拟态效果增强 */
+            /* 3. 登录卡片样式：增强玻璃拟态 */
             .glass-card {{
-                background: rgba(255, 255, 255, 0.9); /*稍微白一点，保证文字清晰*/
-                backdrop-filter: blur(15px);
-                border-radius: 20px;
-                padding: 40px;
+                background: rgba(255, 255, 255, 0.85);
+                backdrop-filter: blur(20px);
+                -webkit-backdrop-filter: blur(20px);
+                border-radius: 24px;
+                padding: 50px;
                 box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
-                border: 1px solid rgba(255, 255, 255, 0.5);
-                margin-top: 100px; /* 让卡片往下一点，不要顶着头 */
+                border: 1px solid rgba(255, 255, 255, 0.6);
+                margin-top: 80px;
             }}
             
-            /* 隐藏默认菜单 */
+            /* 隐藏无关元素 */
             #MainMenu {{visibility: hidden;}}
             footer {{visibility: hidden;}}
+            
+            /* 调整输入框样式让其更现代 */
+            .stTextInput input {{
+                border-radius: 10px;
+                border: 1px solid #ddd;
+                padding: 10px;
+            }}
         </style>
         """
     else:
         # 登录后的主界面：恢复干净清爽的样式
         css = """
         <style>
-            [data-testid="stAppViewContainer"] {
-                background-image: none;
-                background-color: #f8f9fa; /* 淡淡的灰白色，护眼 */
+            .stApp {
+                background-image: none !important;
+                background-color: #f8f9fa !important;
             }
-            [data-testid="stHeader"] {
-                background-color: rgba(255,255,255,1);
+            header[data-testid="stHeader"] {
+                background-color: rgba(255,255,255,1) !important;
             }
             
             /* 商业化卡片样式 */
@@ -73,7 +83,7 @@ def set_bg(state):
                 text-align: center;
                 transition: all 0.3s ease;
                 background-color: white;
-                box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+                box-shadow: 0 4px 6px rgba(0,0,0,0.05);
             }
             .pricing-card:hover {
                 transform: translateY(-5px);
@@ -213,7 +223,7 @@ def login_page():
 
         st.markdown('</div>', unsafe_allow_html=True)
 
-# --- 5. 界面函数：主程序 (已增加 2000 字限制) ---
+# --- 5. 界面函数：主程序 (已增加 1000 字限制) ---
 def main_app():
     # 切换回主界面背景
     set_bg('main') 
@@ -246,19 +256,29 @@ def main_app():
 
         col1, col2 = st.columns([1, 1])
         with col1:
+            # 左侧：输入框
             text_input = st.text_area("请输入需要降重的文本", height=400, placeholder="在此粘贴您的论文段落...")
             word_count = len(text_input)
             
-            # --- 🛠️ 修改点 1：字数提示与警告 ---
+            # 左侧底部：字数统计
             if word_count > MAX_ONCE_LIMIT:
                 st.markdown(f":red[⚠️ 当前字数: {word_count} / {MAX_ONCE_LIMIT} (已超限)]")
             else:
                 st.caption(f"当前字数: {word_count} / {MAX_ONCE_LIMIT}")
         
         with col2:
-            st.write("降重结果预览")
+            # 右侧：结果框
+            # 1. 删掉了原来的 st.write("降重结果预览")，防止顶部不齐
+            
+            # 2. 创建占位容器
             result_area = st.empty()
-            result_area.text_area("结果将显示在这里", height=400, disabled=True)
+            
+            # 3. 将标题 "降重结果预览" 直接作为 text_area 的 label 参数
+            # 这样左右两边的标题高度就完全一样了
+            result_area.text_area("降重结果预览", height=400, disabled=True, placeholder="结果将显示在这里...")
+            
+            # 4. 【关键】加一个空的 caption，为了和左边的“字数统计”对齐底部高度
+            st.caption(" ")
 
         # 操作栏
         st.divider()
