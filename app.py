@@ -18,13 +18,12 @@ def set_bg(state):
     state: 'login' (显示动漫背景) 或 'main' (显示纯白背景)
     """
     if state == 'login':
-        # 1. 换用 Unsplash 稳定图源 (新海诚风格云朵/风景)
-        # 如果你想换图，只需把下面的链接换成你自己的图片链接即可
+        # 这里用的是 Unsplash 的高清动漫风风景图，你可以随意换
         bg_url = "https://images.unsplash.com/photo-1493246507139-91e8fad9978e?ixlib=rb-4.0.3&q=85&fm=jpg&crop=entropy&cs=srgb&w=1920"
         
         css = f"""
         <style>
-            /* 1. 强制覆盖全屏背景 */
+            /* 1. 背景铺满 */
             .stApp {{
                 background-image: url("{bg_url}") !important;
                 background-size: cover !important;
@@ -33,69 +32,48 @@ def set_bg(state):
                 background-attachment: fixed !important;
             }}
             
-            /* 2. 顶部Header透明化 */
+            /* 2. 隐藏 Header */
             header[data-testid="stHeader"] {{
                 background-color: rgba(0,0,0,0) !important;
-                z-index: 1; /* 保证不遮挡背景 */
             }}
             
-            /* 3. 登录卡片样式：增强玻璃拟态 */
-            .glass-card {{
-                background: rgba(255, 255, 255, 0.85);
-                backdrop-filter: blur(20px);
-                -webkit-backdrop-filter: blur(20px);
-                border-radius: 24px;
-                padding: 50px;
-                box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
-                border: 1px solid rgba(255, 255, 255, 0.6);
-                margin-top: 80px;
+            /* 3. 【核心技巧】自动美化登录框所在的“中间列” */
+            /* 这里的逻辑是：找到第 2 个列 (column)，给它加玻璃特效 */
+            div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-of-type(2) > div[data-testid="stVerticalBlock"] {{
+                background: rgba(255, 255, 255, 0.85); /* 半透明白 */
+                backdrop-filter: blur(20px);             /* 磨砂质感 */
+                border-radius: 20px;                     /* 圆角 */
+                padding: 40px;                           /* 内边距 */
+                box-shadow: 0 10px 40px rgba(0,0,0,0.2); /* 阴影 */
+                border: 1px solid rgba(255,255,255,0.5); /* 描边 */
             }}
             
-            /* 隐藏无关元素 */
+            /* 输入框美化 */
+            .stTextInput input {{
+                border-radius: 8px;
+                padding: 10px;
+                border: 1px solid #ddd;
+            }}
+            
+            /* 隐藏页脚 */
             #MainMenu {{visibility: hidden;}}
             footer {{visibility: hidden;}}
-            
-            /* 调整输入框样式让其更现代 */
-            .stTextInput input {{
-                border-radius: 10px;
-                border: 1px solid #ddd;
-                padding: 10px;
-            }}
         </style>
         """
     else:
-        # 登录后的主界面：恢复干净清爽的样式
+        # 主界面 CSS (保持不变)
         css = """
         <style>
-            .stApp {
-                background-image: none !important;
-                background-color: #f8f9fa !important;
-            }
-            header[data-testid="stHeader"] {
-                background-color: rgba(255,255,255,1) !important;
-            }
-            
-            /* 商业化卡片样式 */
+            .stApp {background-image: none !important; background-color: #f8f9fa !important;}
+            header[data-testid="stHeader"] {background-color: rgba(255,255,255,1) !important;}
             .pricing-card {
-                border: 1px solid #e0e0e0;
-                border-radius: 12px;
-                padding: 25px;
-                text-align: center;
-                transition: all 0.3s ease;
-                background-color: white;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+                border: 1px solid #e0e0e0; border-radius: 12px; padding: 25px;
+                text-align: center; background-color: white; transition: all 0.3s ease;
             }
             .pricing-card:hover {
-                transform: translateY(-5px);
-                box-shadow: 0 10px 20px rgba(255, 75, 75, 0.2);
-                border-color: #ff4b4b;
+                transform: translateY(-5px); box-shadow: 0 10px 20px rgba(255, 75, 75, 0.2); border-color: #ff4b4b;
             }
-            .price-tag {
-                color: #ff4b4b;
-                font-size: 1.8em;
-                font-weight: bold;
-                margin: 10px 0;
-            }
+            .price-tag {color: #ff4b4b; font-size: 1.8em; font-weight: bold; margin: 10px 0;}
         </style>
         """
     st.markdown(css, unsafe_allow_html=True)
@@ -163,29 +141,33 @@ def redeem_code(username, code_input):
     except Exception as e:
         return False, f"系统错误: {e}"
 
-# --- 4. 界面函数：登录页 (全屏背景版) ---
+# --- 4. 界面函数：登录页 (带海报版) ---
 def login_page():
-    # 注入登录页专属 CSS
     set_bg('login')
     
-    # 使用 3 列布局，中间宽一点，把卡片挤在中间
-    col1, col2, col3 = st.columns([1, 1.5, 1])
+    # 三列布局：1:1.2:1，中间稍微宽一点点
+    col1, col2, col3 = st.columns([1, 1.2, 1])
     
     with col2:
-        # 直接开始写卡片内容
-        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+        # 1. 【新增】顶部海报/Logo
+        # 这里用 Dicebear 生成一个可爱的机器人头像作为 Logo，也可以换成你自己的 Banner 图片
+        st.image("https://api.dicebear.com/9.x/bottts-neutral/svg?seed=PaperKillerApp", 
+                 width=120, 
+                 use_container_width=False) 
         
-        st.markdown("<h1 style='text-align: center; color: #333;'>🐾 Paper Killer</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #666; margin-bottom: 30px;'>二次元 AI 论文降重助手 · 专业版</p>", unsafe_allow_html=True)
+        # 2. 标题区
+        st.markdown("<h1 style='text-align: center; color: #333; margin-top: -20px;'>Paper Killer</h1>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #666; font-size: 14px; margin-bottom: 30px;'>✨ 作业狗AI论文降重专家</p>", unsafe_allow_html=True)
         
-        tab1, tab2 = st.tabs(["🔐 账号登录", "✨ 快速注册"])
+        # 3. 登录/注册表单
+        tab1, tab2 = st.tabs(["🔐 账号登录", "🎁 快速注册"])
         
         with tab1:
-            u = st.text_input("用户名", key="l_u", placeholder="请输入用户名")
+            u = st.text_input("用户名", key="l_u", placeholder="请输入账号")
             p = st.text_input("密码", type="password", key="l_p", placeholder="请输入密码")
-            st.markdown("<br>", unsafe_allow_html=True) # 加点空行
+            st.markdown(" <br>", unsafe_allow_html=True)
             
-            if st.button("🚀 进入工作台", use_container_width=True, type="primary"):
+            if st.button("🚀 登录工作台", use_container_width=True, type="primary"):
                 if u and p:
                     try:
                         df = load_users()
@@ -194,34 +176,32 @@ def login_page():
                             st.session_state['logged_in'] = True
                             st.session_state['username'] = u
                             st.session_state['balance'] = float(user.iloc[0]['balance'])
-                            st.toast("登录成功！正在跳转...", icon="🎉")
-                            time.sleep(1)
+                            st.toast("登录成功！", icon="🎉")
+                            time.sleep(0.5)
                             st.rerun()
                         else:
-                            st.error("账号或密码错误")
+                            st.error("❌ 账号或密码错误")
                     except Exception as e:
                         st.error(f"连接失败: {e}")
 
         with tab2:
-            ru = st.text_input("设置用户名", key="r_u", placeholder="3-10位字符")
-            rp = st.text_input("设置密码", type="password", key="r_p", placeholder="设置安全密码")
-            st.markdown("<br>", unsafe_allow_html=True)
+            ru = st.text_input("设置用户名", key="r_u", placeholder="建议使用字母或数字")
+            rp = st.text_input("设置密码", type="password", key="r_p", placeholder="6位以上字符")
+            st.markdown(" <br>", unsafe_allow_html=True)
             
-            if st.button("🎁 立即注册 (赠送200字)", use_container_width=True):
+            if st.button("✨ 立即注册 (领200字)", use_container_width=True):
                 if ru and rp:
                     try:
                         df = load_users()
                         if ru in df['username'].values:
-                            st.error("用户已存在")
+                            st.error("⚠️ 用户名已存在")
                         else:
                             new_row = pd.DataFrame([{"username": ru, "password": rp, "balance": 200}])
                             sync_user_to_cloud(pd.concat([df, new_row], ignore_index=True))
                             st.balloons()
-                            st.success("注册成功！请切换到登录页登录")
+                            st.success("✅ 注册成功！请切换到登录页。")
                     except Exception as e:
                         st.error(f"注册失败: {e}")
-
-        st.markdown('</div>', unsafe_allow_html=True)
 
 # --- 5. 界面函数：主程序 (已增加 1000 字限制) ---
 def main_app():
