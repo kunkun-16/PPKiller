@@ -102,22 +102,36 @@ def sync_user_to_cloud(updated_df):
     conn = get_db_connection()
     conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=updated_df)
 
-# --- 3. 核心功能：卡密充值逻辑 ---
+# --- 3. 核心功能：卡密充值逻辑 (修复版) ---
 def redeem_code(username, code_input):
     """验证卡密并充值"""
     conn = get_db_connection()
     try:
-        # 1. 读取卡密表 (RedemptionCodes)
+        # 1. 读取卡密表
+        # ⚠️ 如果报错 "WorksheetNotFound"，请检查 Google 表格里是否真的新建了 "RedemptionCodes" 标签页
         codes_df = conn.read(spreadsheet=SHEET_URL, worksheet="RedemptionCodes", ttl=0)
         
+        # --- 🛠️ 关键修复开始：清洗数据 ---
+        # 强制把 'code' 列转为字符串，并切掉 .0
+        codes_df['code'] = codes_df['code'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        # 强制把 'status' 列转为字符串并去空格
+        codes_df['status'] = codes_df['status'].astype(str).str.strip()
+        # --- 🛠️ 关键修复结束 ---
+        
         # 2. 查找卡密
-        code_input = code_input.strip()
-        mask = (codes_df['code'].astype(str) == code_input) & (codes_df['status'] == 'unused')
+        code_input = code_input.strip() # 清理用户输入的空格
+        
+        # 打印调试信息 (如果还不行，把下面这行取消注释，看看后台打印了什么)
+        # print(f"用户输入: {code_input}, 表格数据: {codes_df['code'].tolist()}")
+        
+        mask = (codes_df['code'] == code_input) & (codes_df['status'] == 'unused')
         
         if not codes_df[mask].empty:
             # 找到有效卡密
             idx = codes_df[mask].index[0]
-            add_words = int(codes_df.at[idx, 'words'])
+            
+            # 读取面值 (防止数字读取错误)
+            add_words = int(float(codes_df.at[idx, 'words']))
             
             # 3. 更新卡密状态为已使用
             codes_df.at[idx, 'status'] = 'used'
@@ -128,15 +142,19 @@ def redeem_code(username, code_input):
             # 4. 更新用户余额
             users_df = load_users()
             user_idx = users_df[users_df['username'] == username].index[0]
-            current_bal = users_df.at[user_idx, 'balance']
-            users_df.at[user_idx, 'balance'] = current_bal + add_words
+            
+            # 计算新余额
+            current_bal = float(users_df.at[user_idx, 'balance'])
+            new_bal = current_bal + add_words
+            
+            users_df.at[user_idx, 'balance'] = new_bal
             sync_user_to_cloud(users_df)
             
             # 5. 更新 Session
-            st.session_state['balance'] = current_bal + add_words
+            st.session_state['balance'] = new_bal
             return True, add_words
         else:
-            return False, "卡密无效或已被使用"
+            return False, "卡密无效、已被使用或不存在"
             
     except Exception as e:
         return False, f"系统错误: {e}"
