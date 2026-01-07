@@ -173,7 +173,7 @@ def login_page():
                     <h1 style="margin: 0; padding: 0; font-size: 34px; color: #2c3e50; font-weight: 800; line-height: 1.2;">
                         Paper Killer
                     </h1>
-                    <p style="margin: 5px 0 0 0; color: #7f8c8d; font-size: 14px;">
+                    <p style="margin: 5px 0 0 0; color: #ff4b4b; font-size: 14px;font-weight: bold">
                         ✨作业狗AI降重助手
                     </p>
                 </div>
