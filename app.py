@@ -6,66 +6,93 @@ import time
 
 # --- 1. 页面配置 & 样式注入 ---
 st.set_page_config(
-    page_title="作业狗 AI Killer ",
+    page_title="Paper Killer Pro",
     page_icon="🐶",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed" # 登录页默认收起侧边栏，更美观
 )
 
-# 动漫风格登录页 + 专业版主页 CSS
-CUSTOM_CSS = """
-<style>
-    /* 全局字体 */
-    .stApp {
-        font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
-    }
-    
-    /* 登录页背景 (二次元风格) */
-    .login-bg {
-        background-image: url("https://api.paugram.com/wallpaper?source=gh"); /* 随机二次元壁纸接口 */
-        background-size: cover;
-        background-position: center;
-        background-repeat: no-repeat;
-        padding: 50px;
-        border-radius: 15px;
-    }
-    
-    /* 玻璃拟态卡片 */
-    .glass-card {
-        background: rgba(255, 255, 255, 0.85);
-        backdrop-filter: blur(10px);
-        border-radius: 20px;
-        padding: 40px;
-        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
-        border: 1px solid rgba(255, 255, 255, 0.18);
-    }
+def set_bg(state):
+    """
+    根据登录状态动态切换背景
+    state: 'login' (显示动漫背景) 或 'main' (显示纯白背景)
+    """
+    if state == 'login':
+        # 这里使用了一张高清的初音未来/二次元风景图，你也可以换成自己的图片链接
+        bg_url = "https://w.wallhaven.cc/full/wq/wallhaven-wqery7.jpg" 
+        
+        css = f"""
+        <style>
+            /* 1. 全局背景控制：强制覆盖整个窗口 */
+            [data-testid="stAppViewContainer"] {{
+                background-image: url("{bg_url}");
+                background-size: cover;
+                background-position: center;
+                background-repeat: no-repeat;
+                background-attachment: fixed;
+            }}
+            
+            /* 2. 顶部Header透明化：去掉Streamlit默认的白条 */
+            [data-testid="stHeader"] {{
+                background-color: rgba(0,0,0,0);
+            }}
+            
+            /* 3. 登录卡片样式：玻璃拟态效果增强 */
+            .glass-card {{
+                background: rgba(255, 255, 255, 0.9); /*稍微白一点，保证文字清晰*/
+                backdrop-filter: blur(15px);
+                border-radius: 20px;
+                padding: 40px;
+                box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+                border: 1px solid rgba(255, 255, 255, 0.5);
+                margin-top: 100px; /* 让卡片往下一点，不要顶着头 */
+            }}
+            
+            /* 隐藏默认菜单 */
+            #MainMenu {{visibility: hidden;}}
+            footer {{visibility: hidden;}}
+        </style>
+        """
+    else:
+        # 登录后的主界面：恢复干净清爽的样式
+        css = """
+        <style>
+            [data-testid="stAppViewContainer"] {
+                background-image: none;
+                background-color: #f8f9fa; /* 淡淡的灰白色，护眼 */
+            }
+            [data-testid="stHeader"] {
+                background-color: rgba(255,255,255,1);
+            }
+            
+            /* 商业化卡片样式 */
+            .pricing-card {
+                border: 1px solid #e0e0e0;
+                border-radius: 12px;
+                padding: 25px;
+                text-align: center;
+                transition: all 0.3s ease;
+                background-color: white;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            }
+            .pricing-card:hover {
+                transform: translateY(-5px);
+                box-shadow: 0 10px 20px rgba(255, 75, 75, 0.2);
+                border-color: #ff4b4b;
+            }
+            .price-tag {
+                color: #ff4b4b;
+                font-size: 1.8em;
+                font-weight: bold;
+                margin: 10px 0;
+            }
+        </style>
+        """
+    st.markdown(css, unsafe_allow_html=True)
 
-    /* 商业化卡片样式 */
-    .pricing-card {
-        border: 1px solid #e0e0e0;
-        border-radius: 10px;
-        padding: 20px;
-        text-align: center;
-        transition: transform 0.3s;
-        background-color: white;
-    }
-    .pricing-card:hover {
-        transform: scale(1.05);
-        box-shadow: 0 10px 20px rgba(0,0,0,0.1);
-        border-color: #ff4b4b;
-    }
-    .price-tag {
-        color: #ff4b4b;
-        font-size: 1.5em;
-        font-weight: bold;
-    }
-    
-    /* 隐藏默认 Streamlit 菜单 */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-</style>
-"""
-st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+# 初始化时调用一次
+if 'logged_in' not in st.session_state:
+    st.session_state['logged_in'] = False
 
 # --- 2. 数据库连接配置 (Service Account) ---
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1jbHWvatK4VGlSgPYgBLXF9CqQugceCw9T20iXuXAGMg/edit?usp=sharing" # ⚠️⚠️⚠️ 请务必换回你的链接 ⚠️⚠️⚠️
@@ -126,23 +153,28 @@ def redeem_code(username, code_input):
     except Exception as e:
         return False, f"系统错误: {e}"
 
-# --- 4. 界面函数：登录页 (动漫风) ---
+# --- 4. 界面函数：登录页 (全屏背景版) ---
 def login_page():
-    # 使用列布局来居中显示登录框
-    col1, col2, col3 = st.columns([1, 2, 1])
+    # 注入登录页专属 CSS
+    set_bg('login')
+    
+    # 使用 3 列布局，中间宽一点，把卡片挤在中间
+    col1, col2, col3 = st.columns([1, 1.5, 1])
     
     with col2:
-        st.markdown('<div class="login-bg">', unsafe_allow_html=True)
+        # 直接开始写卡片内容
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
         
-        st.title("🐾 Paper Killer 登录")
-        st.markdown("### 作业狗AI论文降重助手")
+        st.markdown("<h1 style='text-align: center; color: #333;'>🐾 Paper Killer</h1>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #666; margin-bottom: 30px;'>二次元 AI 论文降重助手 · 专业版</p>", unsafe_allow_html=True)
         
         tab1, tab2 = st.tabs(["🔐 账号登录", "✨ 快速注册"])
         
         with tab1:
-            u = st.text_input("用户名", key="l_u")
-            p = st.text_input("密码", type="password", key="l_p")
+            u = st.text_input("用户名", key="l_u", placeholder="请输入用户名")
+            p = st.text_input("密码", type="password", key="l_p", placeholder="请输入密码")
+            st.markdown("<br>", unsafe_allow_html=True) # 加点空行
+            
             if st.button("🚀 进入工作台", use_container_width=True, type="primary"):
                 if u and p:
                     try:
@@ -152,8 +184,8 @@ def login_page():
                             st.session_state['logged_in'] = True
                             st.session_state['username'] = u
                             st.session_state['balance'] = float(user.iloc[0]['balance'])
-                            st.success("欢迎回来！")
-                            time.sleep(0.5)
+                            st.toast("登录成功！正在跳转...", icon="🎉")
+                            time.sleep(1)
                             st.rerun()
                         else:
                             st.error("账号或密码错误")
@@ -161,9 +193,11 @@ def login_page():
                         st.error(f"连接失败: {e}")
 
         with tab2:
-            ru = st.text_input("设置用户名", key="r_u")
-            rp = st.text_input("设置密码", type="password", key="r_p")
-            if st.button("立即注册 (赠送200字)", use_container_width=True):
+            ru = st.text_input("设置用户名", key="r_u", placeholder="3-10位字符")
+            rp = st.text_input("设置密码", type="password", key="r_p", placeholder="设置安全密码")
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            if st.button("🎁 立即注册 (赠送200字)", use_container_width=True):
                 if ru and rp:
                     try:
                         df = load_users()
@@ -172,16 +206,22 @@ def login_page():
                         else:
                             new_row = pd.DataFrame([{"username": ru, "password": rp, "balance": 200}])
                             sync_user_to_cloud(pd.concat([df, new_row], ignore_index=True))
-                            st.success("注册成功！请登录")
+                            st.balloons()
+                            st.success("注册成功！请切换到登录页登录")
                     except Exception as e:
                         st.error(f"注册失败: {e}")
 
-        st.markdown('</div></div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
-# --- 5. 界面函数：主程序 (已增加 1000 字限制) ---
+# --- 5. 界面函数：主程序 (已增加 2000 字限制) ---
 def main_app():
-    # 侧边栏：用户信息与导航
+    # 切换回主界面背景
+    set_bg('main') 
+    
+    # ... 下面是原本的代码 ...
     with st.sidebar:
+        # ...
+    # 侧边栏：用户信息与导航
         # 使用 Dicebear 生成头像
         st.image(f"https://api.dicebear.com/7.x/avataaars/svg?seed={st.session_state['username']}", width=100)
         st.markdown(f"### Hi, {st.session_state['username']}")
