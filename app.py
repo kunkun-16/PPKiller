@@ -1,254 +1,377 @@
 import streamlit as st
-from openai import OpenAI
-import json
-import os
+import pandas as pd
+from streamlit_gsheets import GSheetsConnection
+from datetime import datetime
 import time
 
-# --- 1. 全局配置 ---
+# --- 1. 页面配置 & 样式注入 ---
 st.set_page_config(
-    page_title="口袋狗AI降重 - 2026专业版",
+    page_title="Paper Killer Pro",
     page_icon="🐶",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="collapsed" # 登录页默认收起侧边栏，更美观
 )
 
-# --- 2. 核心配置区 (请修改这里) ---
-# 你的 DeepSeek API Key (必须填，否则跑不通)
-SYSTEM_API_KEY = "sk-8b582db9fd144de4935b1957db1deb2e" 
-
-# 文件路径
-USER_DB = "users.json"
-COUPON_DB = "coupons.json"
-
-# --- 3. 数据库工具函数 ---
-def init_db():
-    """确保数据库文件存在，防止报错"""
-    if not os.path.exists(USER_DB):
-        with open(USER_DB, "w") as f: json.dump({}, f)
-    if not os.path.exists(COUPON_DB):
-        with open(COUPON_DB, "w") as f: json.dump({}, f)
-
-def load_json(path):
-    init_db()
-    try:
-        with open(path, "r", encoding="utf-8") as f: return json.load(f)
-    except: return {}
-
-# --- 替换原来的 save_json 函数 ---
-def save_json(path, data):
-    try:
-        # 尝试写入文件
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4)
-    except PermissionError:
-        # 如果报错，提示用户
-        st.error(f"❌ 写入失败！文件 {path} 被占用了。")
-        st.warning("💡 请检查：你是不是在 Cursor 或其他软件里打开了这个文件？请先关闭它！")
-        # 停止运行，防止数据丢失
-        st.stop()
-
-def update_balance(username, amount):
-    users = load_json(USER_DB)
-    if username in users:
-        users[username]['balance'] += amount
-        save_json(USER_DB, users)
-        st.session_state.user_info['balance'] = users[username]['balance']
-        return True
-    return False
-
-# --- 4. 登录/注册页面 (仿写作狗) ---
-def login_page():
-    st.markdown("""
-    <style>
-        .big-font {font-size:30px !important; font-weight: bold;}
-        .sub-font {font-size:16px; color: #666;}
-        .login-box {border: 1px solid #ddd; padding: 20px; border-radius: 10px; box-shadow: 2px 2px 10px #eee;}
-    </style>
-    """, unsafe_allow_html=True)
-
-    col1, col2 = st.columns([1.2, 1])
-
-    with col1:
-        st.image("https://img.freepik.com/free-vector/blogging-concept-illustration_114360-1038.jpg", width=500)
-    
-    with col2:
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown('<p class="big-font">让学术写作更简单</p>', unsafe_allow_html=True)
-        st.markdown('<p class="sub-font"> 强力降重 · 专攻 AIGC 检测 · 深度去AI</p>', unsafe_allow_html=True)
+def set_bg(state):
+    """
+    根据登录状态动态切换背景
+    state: 'login' (显示动漫背景) 或 'main' (显示纯白背景)
+    """
+    if state == 'login':
+        # 这里用的是 Unsplash 的高清动漫风风景图，你可以随意换
+        bg_url = "https://images.unsplash.com/photo-1493246507139-91e8fad9978e?ixlib=rb-4.0.3&q=85&fm=jpg&crop=entropy&cs=srgb&w=1920"
         
-        tab1, tab2 = st.tabs(["🔐 账号登录", "🆕 快速注册"])
+        css = f"""
+        <style>
+            /* 1. 背景铺满 */
+            .stApp {{
+                background-image: url("{bg_url}") !important;
+                background-size: cover !important;
+                background-position: center center !important;
+                background-repeat: no-repeat !important;
+                background-attachment: fixed !important;
+            }}
+            
+            /* 2. 隐藏 Header */
+            header[data-testid="stHeader"] {{
+                background-color: rgba(0,0,0,0) !important;
+            }}
+            
+            /* 3. 【核心技巧】自动美化登录框所在的“中间列” */
+            /* 这里的逻辑是：找到第 2 个列 (column)，给它加玻璃特效 */
+            div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-of-type(2) > div[data-testid="stVerticalBlock"] {{
+                background: rgba(255, 255, 255, 0.85); /* 半透明白 */
+                backdrop-filter: blur(20px);             /* 磨砂质感 */
+                border-radius: 20px;                     /* 圆角 */
+                padding: 40px;                           /* 内边距 */
+                box-shadow: 0 10px 40px rgba(0,0,0,0.2); /* 阴影 */
+                border: 1px solid rgba(255,255,255,0.5); /* 描边 */
+            }}
+            
+            /* 输入框美化 */
+            .stTextInput input {{
+                border-radius: 8px;
+                padding: 10px;
+                border: 1px solid #ddd;
+            }}
+            
+            /* 隐藏页脚 */
+            #MainMenu {{visibility: hidden;}}
+            footer {{visibility: hidden;}}
+        </style>
+        """
+    else:
+        # 主界面 CSS (保持不变)
+        css = """
+        <style>
+            .stApp {background-image: none !important; background-color: #f8f9fa !important;}
+            header[data-testid="stHeader"] {background-color: rgba(255,255,255,1) !important;}
+            .pricing-card {
+                border: 1px solid #e0e0e0; border-radius: 12px; padding: 25px;
+                text-align: center; background-color: white; transition: all 0.3s ease;
+            }
+            .pricing-card:hover {
+                transform: translateY(-5px); box-shadow: 0 10px 20px rgba(255, 75, 75, 0.2); border-color: #ff4b4b;
+            }
+            .price-tag {color: #ff4b4b; font-size: 1.8em; font-weight: bold; margin: 10px 0;}
+        </style>
+        """
+    st.markdown(css, unsafe_allow_html=True)
+
+# 初始化时调用一次
+if 'logged_in' not in st.session_state:
+    st.session_state['logged_in'] = False
+
+# --- 2. 数据库连接配置 (Service Account) ---
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1jbHWvatK4VGlSgPYgBLXF9CqQugceCw9T20iXuXAGMg/edit?usp=sharing" # ⚠️⚠️⚠️ 请务必换回你的链接 ⚠️⚠️⚠️
+
+def get_db_connection():
+    return st.connection("gsheets", type=GSheetsConnection)
+
+def load_users():
+    conn = get_db_connection()
+    # 强制读取 Sheet1
+    df = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0)
+    # 类型清洗
+    df['username'] = df['username'].astype(str).str.replace(r'\.0$', '', regex=True)
+    df['password'] = df['password'].astype(str).str.replace(r'\.0$', '', regex=True)
+    df['balance'] = pd.to_numeric(df['balance'], errors='coerce').fillna(0)
+    return df
+
+def sync_user_to_cloud(updated_df):
+    conn = get_db_connection()
+    conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=updated_df)
+
+# --- 3. 核心功能：卡密充值逻辑 ---
+def redeem_code(username, code_input):
+    """验证卡密并充值"""
+    conn = get_db_connection()
+    try:
+        # 1. 读取卡密表 (RedemptionCodes)
+        codes_df = conn.read(spreadsheet=SHEET_URL, worksheet="RedemptionCodes", ttl=0)
+        
+        # 2. 查找卡密
+        code_input = code_input.strip()
+        mask = (codes_df['code'].astype(str) == code_input) & (codes_df['status'] == 'unused')
+        
+        if not codes_df[mask].empty:
+            # 找到有效卡密
+            idx = codes_df[mask].index[0]
+            add_words = int(codes_df.at[idx, 'words'])
+            
+            # 3. 更新卡密状态为已使用
+            codes_df.at[idx, 'status'] = 'used'
+            codes_df.at[idx, 'used_by'] = username
+            codes_df.at[idx, 'used_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            conn.update(spreadsheet=SHEET_URL, worksheet="RedemptionCodes", data=codes_df)
+            
+            # 4. 更新用户余额
+            users_df = load_users()
+            user_idx = users_df[users_df['username'] == username].index[0]
+            current_bal = users_df.at[user_idx, 'balance']
+            users_df.at[user_idx, 'balance'] = current_bal + add_words
+            sync_user_to_cloud(users_df)
+            
+            # 5. 更新 Session
+            st.session_state['balance'] = current_bal + add_words
+            return True, add_words
+        else:
+            return False, "卡密无效或已被使用"
+            
+    except Exception as e:
+        return False, f"系统错误: {e}"
+
+# --- 4. 界面函数：登录页 (带海报版) ---
+def login_page():
+    set_bg('login')
+    
+    # 三列布局：1:1.2:1，中间稍微宽一点点
+    col1, col2, col3 = st.columns([1, 1.2, 1])
+    
+    ith col2:
+        # 1. 【新增】顶部海报/Logo
+        # 这里用 Dicebear 生成一个可爱的机器人头像作为 Logo，也可以换成你自己的 Banner 图片
+        st.image("https://api.dicebear.com/9.x/bottts-neutral/svg?seed=PaperKillerApp", 
+                 width=120, 
+                 use_container_width=False)
+        
+        # 2. 标题区
+        st.markdown("<h1 style='text-align: center; color: #333; margin-top: -20px;'>Paper Killer</h1>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #666; font-size: 14px; margin-bottom: 30px;'>✨ 作业狗AI论文降重专家</p>", unsafe_allow_html=True)
+        
+        # 3. 登录/注册表单
+        tab1, tab2 = st.tabs(["🔐 账号登录", "🎁 快速注册"])
         
         with tab1:
-            username = st.text_input("用户名", key="l_user")
-            password = st.text_input("密码", type="password", key="l_pass")
+            u = st.text_input("用户名", key="l_u", placeholder="请输入账号")
+            p = st.text_input("密码", type="password", key="l_p", placeholder="请输入密码")
+            st.markdown(" <br>", unsafe_allow_html=True)
             
-            if st.button("登录", type="primary", use_container_width=True):
-                # 1. 尝试加载数据库
-                users = load_json(USER_DB)
-                
-                # 2. 超级后门：如果输入 admin / 123，直接通过，不管数据库里有没有
-                if username == "admin" and password == "123":
-                    st.session_state.logged_in = True
-                    st.session_state.username = "admin"
-                    st.session_state.user_info = {"password": "123", "balance": 999999}
-                    st.success("管理员登录成功！")
-                    time.sleep(0.5)
-                    st.rerun()
-                
-                # 3. 普通用户逻辑
-                elif username in users and users[username]['password'] == password:
-                    st.session_state.logged_in = True
-                    st.session_state.username = username
-                    st.session_state.user_info = users[username]
-                    st.success("登录成功！")
-                    time.sleep(0.5)
-                    st.rerun()
-                else:
-                    st.error("❌ 账号或密码错误")
+            if st.button("🚀 登录工作台", use_container_width=True, type="primary"):
+                if u and p:
+                    try:
+                        df = load_users()
+                        user = df[(df['username'] == u) & (df['password'] == p)]
+                        if not user.empty:
+                            st.session_state['logged_in'] = True
+                            st.session_state['username'] = u
+                            st.session_state['balance'] = float(user.iloc[0]['balance'])
+                            st.toast("登录成功！", icon="🎉")
+                            time.sleep(0.5)
+                            st.rerun()
+                        else:
+                            st.error("❌ 账号或密码错误")
+                    except Exception as e:
+                        st.error(f"连接失败: {e}")
 
         with tab2:
-            new_user = st.text_input("设置用户名", key="r_user")
-            new_pass = st.text_input("设置密码", type="password", key="r_pass")
-            if st.button("注册并登录", use_container_width=True):
-                users = load_json(USER_DB)
-                if new_user in users:
-                    st.error("用户名已存在")
-                elif not new_user or not new_pass:
-                    st.warning("请填写完整")
-                else:
-                    # 注册送200字
-                    users[new_user] = {"password": new_pass, "balance": 200} 
-                    save_json(USER_DB, users)
-                    st.success("注册成功！请切换到登录页使用 admin / 123 或您的新账号。")
+            ru = st.text_input("设置用户名", key="r_u", placeholder="建议使用字母或数字")
+            rp = st.text_input("设置密码", type="password", key="r_p", placeholder="6位以上字符")
+            st.markdown(" <br>", unsafe_allow_html=True)
+            
+            if st.button("✨ 立即注册 (领200字)", use_container_width=True):
+                if ru and rp:
+                    try:
+                        df = load_users()
+                        if ru in df['username'].values:
+                            st.error("⚠️ 用户名已存在")
+                        else:
+                            new_row = pd.DataFrame([{"username": ru, "password": rp, "balance": 200}])
+                            sync_user_to_cloud(pd.concat([df, new_row], ignore_index=True))
+                            st.balloons()
+                            st.success("✅ 注册成功！请切换到登录页。")
+                    except Exception as e:
+                        st.error(f"注册失败: {e}")
 
-# --- 5. 主工作台 (Main App) ---
+# --- 5. 界面函数：主程序 (已增加 1000 字限制) ---
 def main_app():
-    user = st.session_state.username
-    balance = st.session_state.user_info.get('balance', 0)
+    # 切换回主界面背景
+    set_bg('main') 
     
-    # --- 侧边栏 ---
+    # ... 下面是原本的代码 ...
     with st.sidebar:
-        st.title("🐶 口袋狗工作台")
-        st.info(f"👤 用户：{user}")
+        # ...
+    # 侧边栏：用户信息与导航
+        # 使用 Dicebear 生成头像
+        st.image(f"https://api.dicebear.com/7.x/avataaars/svg?seed={st.session_state['username']}", width=100)
+        st.markdown(f"### Hi, {st.session_state['username']}")
         
-        # 钱包展示
-        st.metric(label="剩余字数额度", value=balance)
-        if balance < 500:
-            st.warning("⚠️ 余额不足，请充值")
+        balance = st.session_state.get('balance', 0)
+        st.metric("剩余字数", f"{int(balance)} 字")
         
-        st.markdown("---")
+        st.divider()
+        menu = st.radio("功能导航", ["📝 论文降重", "💎 充值中心", "👤 个人中心"])
         
-        # 充值模块
-        st.subheader("💎 卡密充值")
-        code_input = st.text_input("输入兑换码", placeholder="例如: 1000-xxxx")
-        code = code_input.strip() # 去空格
+        if st.button("退出登录"):
+            st.session_state['logged_in'] = False
+            st.rerun()
+
+    # 右侧主界面
+    if menu == "📝 论文降重":
+        st.header("📝 降重工作台")
+        st.info("💡 提示：作业狗正在挥汗加速中...")
         
-        if st.button("立即兑换", use_container_width=True):
-            coupons = load_json(COUPON_DB)
-            if code in coupons and coupons[code]['status'] == 'unused':
-                add_words = coupons[code]['words']
-                # 1. 核销卡密
-                coupons[code]['status'] = 'used'
-                coupons[code]['used_by'] = user
-                save_json(COUPON_DB, coupons)
-                # 2. 增加余额
-                update_balance(user, add_words)
-                st.balloons()
-                st.success(f"充值成功！账户增加 {add_words} 字")
-                time.sleep(1)
-                st.rerun()
+        # 定义单次限制
+        MAX_ONCE_LIMIT = 1000
+
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            # 左侧：输入框
+            text_input = st.text_area("请输入需要降重的文本", height=400, placeholder="在此粘贴您的论文段落...")
+            word_count = len(text_input)
+            
+            # 左侧底部：字数统计
+            if word_count > MAX_ONCE_LIMIT:
+                st.markdown(f":red[⚠️ 当前字数: {word_count} / {MAX_ONCE_LIMIT} (已超限)]")
             else:
-                st.error("❌ 无效卡密或已被使用")
+                st.caption(f"当前字数: {word_count} / {MAX_ONCE_LIMIT}")
         
-        # 购买链接
-        st.markdown("---")
-        st.markdown("#### 🛒 如何获取卡密？")
-        # 这里放你的发卡网链接 https://hwv430.blogspot.com/
-        st.markdown("[👉 点击这里购买充值卡 (3元起)](#)")
+        with col2:
+            # 右侧：结果框
+            # 1. 删掉了原来的 st.write("降重结果预览")，防止顶部不齐
+            
+            # 2. 创建占位容器
+            result_area = st.empty()
+            
+            # 3. 将标题 "降重结果预览" 直接作为 text_area 的 label 参数
+            # 这样左右两边的标题高度就完全一样了
+            result_area.text_area("降重结果预览", height=400, disabled=True, placeholder="结果将显示在这里...")
+            
+            # 4. 【关键】加一个空的 caption，为了和左边的“字数统计”对齐底部高度
+            st.caption(" ")
 
-        # 管理员调试工具
-        with st.expander("👨‍💻 管理员工具"):
-            if st.checkbox("显示可用卡密"):
-                coupons = load_json(COUPON_DB)
-                valid = [k for k,v in coupons.items() if v['status'] == 'unused']
-                if valid:
-                    st.code(valid[0])
-                    st.write(f"剩余库存: {len(valid)} 张")
+        # 操作栏
+        st.divider()
+        btn_col1, btn_col2 = st.columns([3, 1])
+        with btn_col2:
+            if st.button("🚀 开始降重 (扣除字数)", type="primary", use_container_width=True):
+                current_bal = st.session_state['balance']
+                
+                # --- 🛠️ 修改点 2：增加拦截逻辑 ---
+                if word_count == 0:
+                    st.warning("请先输入内容！")
+                elif word_count > MAX_ONCE_LIMIT:
+                    st.error(f"❌ 字数超限！单次最多支持 {MAX_ONCE_LIMIT} 字，请将文本分段后重试。")
+                elif word_count > current_bal:
+                    st.error(f"余额不足！需要 {word_count} 字，当前仅剩 {int(current_bal)} 字。请前往充值中心。")
                 else:
-                    st.write("无可用库存")
-            if st.button("退出登录"):
-                st.session_state.logged_in = False
-                st.rerun()
+                    # --- 这里填入你的真实 API ---
+                    SYSTEM_API_KEY = "sk-8b582db9fd144de4935b1957db1deb2e"  # ⚠️⚠️⚠️ 记得填回你的 Key ⚠️⚠️⚠️
+                    
+                    # 初始化客户端
+                    from openai import OpenAI
+                    try:
+                        client = OpenAI(api_key=SYSTEM_API_KEY, base_url="https://api.deepseek.com")
+                        
+                        with st.spinner("作业狗正在极速降重中..."):
+                            # 发送真实请求
+                            resp = client.chat.completions.create(
+                                model="deepseek-chat",
+                                messages=[
+                                    {"role": "system", "content": "你是一个学术降重专家，请重写用户文本，目的是大幅降低AIGC检测率，规避 AI 检测。要求：1. 彻底打破原有句式结构，多用倒装、插入语。2. 替换所有AI高频词（如'综上所述'、'这一点'）。3. 模拟人类写作的离散度（Burstiness）。4. 增加语句结构的复杂度，混合使用倒装句、强调句。5. 替换常见的 AI 惯用词（如‘显著地’、‘此外’）为更地道的学术表达。6. 引入适度的‘困惑度’（Perplexity），模拟人类思维的非线性跳跃。7. 保持原文愿意不变，核心逻辑不变，但彻底重组句式。请直接输出修改后的文本，不要废话。"},
+                                    {"role": "user", "content": text_input}
+                                ]
+                            )
+                            # 获取结果
+                            real_result = resp.choices[0].message.content
+                            
+                            # 扣费逻辑
+                            df = load_users()
+                            idx = df[df['username'] == st.session_state['username']].index[0]
+                            new_bal = current_bal - word_count
+                            df.at[idx, 'balance'] = new_bal
+                            sync_user_to_cloud(df)
+                            
+                            # 更新 Session 和界面
+                            st.session_state['balance'] = new_bal
+                            result_area.text_area("降重结果", value=real_result, height=400)
+                            st.success(f"成功！消耗 {word_count} 字")
+                            
+                    except Exception as e:
+                        st.error(f"运行出错: {e}")
 
-    # --- 主界面 ---
-    st.header("📝 口袋狗2026专业论文降重 ")
-    
-    col_in, col_out = st.columns(2)
-    
-    with col_in:
-        st.subheader("原文输入")
-        text = st.text_area("请粘贴需要降重的文本", height=500, placeholder="在此处粘贴...")
-        text_len = len(text)
-        st.caption(f"当前字数: {text_len} | 您的余额: {balance}")
+    elif menu == "💎 充值中心":
+        st.header("💎 会员充值中心")
+        st.markdown("选择适合您的套餐，购买卡密后激活即可。")
         
-        # 按钮状态逻辑
-        if text_len == 0:
-            btn_state = True # 为了美观不禁用，但点击会提示
-            btn_txt = "🚀 请先输入内容"
-        elif text_len > balance:
-            btn_state = False # 余额不足禁用
-            btn_txt = f"❌ 余额不足 (需 {text_len} 字)"
-        else:
-            btn_state = True
-            btn_txt = f"🚀 开始降重 (扣除 {text_len} 字)"
+        cols = st.columns(5)
+        packages = [
+            ("尝鲜版", "1,000 字", "¥ 3"),
+            ("标准版", "2,000 字", "¥ 5"),
+            ("进阶版", "5,000 字", "¥ 12"),
+            ("专业版", "10,000 字", "¥ 22"),
+            ("尊享版", "20,000 字", "¥ 40"),
+        ]
+        
+        for i, (name, words, price) in enumerate(packages):
+            with cols[i]:
+                st.markdown(f"""
+                <div class="pricing-card">
+                    <h4>{name}</h4>
+                    <div class="price-tag">{price}</div>
+                    <p>{words}</p>
+                </div>
+                """, unsafe_allow_html=True)
+        
+        st.divider()
+        
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            st.subheader("第一步：获取卡密")
+            st.markdown("""
+            请扫描下方二维码或联系客服购买卡密：
+            - **客服微信**：PaperKiller_Admin
+            - **付款备注**：购买套餐类型
+            """)
+        
+        with c2:
+            st.subheader("第二步：激活卡密")
+            code_input = st.text_input("请输入您的卡密 (Redemption Code)")
+            if st.button("立即激活", type="primary"):
+                if code_input:
+                    with st.spinner("正在验证卡密..."):
+                        success, msg = redeem_code(st.session_state['username'], code_input)
+                        if success:
+                            st.balloons()
+                            st.success(f"充值成功！已增加 {msg} 字。")
+                            time.sleep(2)
+                            st.rerun()
+                        else:
+                            st.error(msg)
+                else:
+                    st.warning("请输入卡密")
 
-        start_btn = st.button(btn_txt, type="primary", disabled=(text_len > balance), use_container_width=True)
+    elif menu == "👤 个人中心":
+        st.header("个人档案")
+        st.write(f"当前用户: {st.session_state['username']}")
+        st.write(f"当前余额: {st.session_state['balance']} 字")
+        st.info("更多功能开发中...")
 
-    if start_btn:
-        if text_len == 0:
-            st.warning("请先输入内容！")
-            st.stop()
-            
-        if "sk-" not in SYSTEM_API_KEY:
-            st.error("❌ 管理员未配置  Key，请联系客服。")
-            st.stop()
-
-        with col_out:
-            st.subheader("降重结果")
-            box = st.empty()
-            box.info("🔄  正在深度思考重写策略 (预计 10-20秒)...")
-            
-            try:
-                # 调用 DeepSeek API
-                client = OpenAI(api_key=SYSTEM_API_KEY, base_url="https://api.deepseek.com")
-                
-                response = client.chat.completions.create(
-                    model="deepseek-chat",
-                    messages=[
-                        {"role": "system", "content": "你是一个论文去痕修改专家。请重写用户文本，目的是大幅降低AIGC检测率。要求：1. 彻底打破原有句式结构，多用倒装、插入语。2. 替换所有AI高频词（如'综上所述'、'这一点'）。3. 模拟人类写作的离散度（Burstiness）。你是一个学术论文修改专家。目标是规避 AI 检测。4. 增加语句结构的复杂度，混合使用倒装句、强调句。5. 替换常见的 AI 惯用词（如‘显著地’、‘此外’）为更地道的学术表达。6. 引入适度的‘困惑度’（Perplexity），模拟人类思维的非线性跳跃。7. 保持原文核心逻辑不变，但彻底重组句式。请直接输出修改后的文本，不要废话。"},
-                        {"role": "user", "content": text},
-                    ],
-                    stream=False
-                )
-                
-                result = response.choices[0].message.content
-                
-                # 扣费
-                update_balance(user, -text_len)
-                
-                # 显示结果
-                box.success(f"✅ 成功！已扣除 {text_len} 字。")
-                st.text_area("建议修改为：", value=result, height=500)
-                
-            except Exception as e:
-                box.error(f"❌ 出错啦：{e}")
-                st.write("请检查网络或  Key 余额。")
-
-# --- 6. 程序入口 ---
+# --- 6. 主入口 ---
 if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
+    st.session_state['logged_in'] = False
 
-if st.session_state.logged_in:
-    main_app()
-else:
+if not st.session_state['logged_in']:
     login_page()
+else:
+    main_app()
