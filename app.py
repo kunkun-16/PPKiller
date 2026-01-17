@@ -1,15 +1,17 @@
 import streamlit as st
 import pandas as pd
-from streamlit_gsheets import GSheetsConnection
 from datetime import datetime
 import time
+import sqlite3
+import json
+import os
 
 # --- 1. 页面配置 & 样式注入 ---
 st.set_page_config(
     page_title="Paper Killer Pro",
     page_icon="🐶",
     layout="wide",
-    initial_sidebar_state="collapsed" # 登录页默认收起侧边栏，更美观
+    initial_sidebar_state="collapsed",  # 登录页默认收起侧边栏，更美观
 )
 
 def set_bg(state):
@@ -78,86 +80,249 @@ def set_bg(state):
         """
     st.markdown(css, unsafe_allow_html=True)
 
-# 初始化时调用一次
-if 'logged_in' not in st.session_state:
-    st.session_state['logged_in'] = False
+DB_PATH = "paper_killer.db"
 
-# --- 2. 数据库连接配置 (Service Account) ---
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1jbHWvatK4VGlSgPYgBLXF9CqQugceCw9T20iXuXAGMg/edit?usp=sharing" # ⚠️⚠️⚠️ 请务必换回你的链接 ⚠️⚠️⚠️
+# 通义千问 / 代理 API 配置（请在此处填入您的 API Key 和模型）
+# ⚠️ 已为你填入当前使用的 key，如需更换只改这一行即可
+QWEN_API_KEY = "sk-LoIz4cW9EQC2Dz05vhCf5QBCNwpXHX6wrak5vsGtZecRqsOH"
+QWEN_MODEL = "Qwen3-235B-A22B"  # 代理平台上的模型名称，例如 Qwen3-235B-A22B
+
 
 def get_db_connection():
-    return st.connection("gsheets", type=GSheetsConnection)
+    """获取 SQLite 连接"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    """
+    初始化本地 SQLite 数据库：
+    - 创建 users 表
+    - 创建 coupons 表
+    - 创建 usage_logs 表（使用记录）
+    - 创建 recharge_logs 表（充值记录）
+    - 从 users.json 和 coupons.json 导入初始数据（如果存在且未导入）
+    """
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # 创建用户表
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY,
+            password TEXT NOT NULL,
+            balance INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+
+    # 创建卡密表
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS coupons (
+            code TEXT PRIMARY KEY,
+            words INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            used_by TEXT,
+            used_time TEXT
+        )
+        """
+    )
+
+    # 创建使用记录表
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS usage_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            words_used INTEGER NOT NULL,
+            operation_time TEXT NOT NULL,
+            operation_type TEXT DEFAULT '降重'
+        )
+        """
+    )
+
+    # 创建充值记录表
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS recharge_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            code TEXT,
+            words_added INTEGER NOT NULL,
+            balance_before INTEGER NOT NULL,
+            balance_after INTEGER NOT NULL,
+            recharge_time TEXT NOT NULL
+        )
+        """
+    )
+
+    # 从 users.json 导入用户（如果文件存在）
+    if os.path.exists("users.json"):
+        with open("users.json", "r", encoding="utf-8") as f:
+            users_data = json.load(f)
+        for username, info in users_data.items():
+            # 检查用户是否已存在
+            cur.execute("SELECT username FROM users WHERE username = ?", (username,))
+            existing = cur.fetchone()
+            if not existing:
+                # 用户不存在，插入
+                cur.execute(
+                    "INSERT INTO users (username, password, balance) VALUES (?, ?, ?)",
+                    (username, str(info.get("password", "")), int(info.get("balance", 0))),
+                )
+            else:
+                # 用户存在，确保密码和余额正确（特别是主账号）
+                cur.execute(
+                    "UPDATE users SET password = ?, balance = ? WHERE username = ?",
+                    (str(info.get("password", "")), int(info.get("balance", 0)), username),
+                )
+    
+    # 确保 admin 账号一定存在（即使 users.json 不存在或没有 admin）
+    cur.execute("SELECT username FROM users WHERE username = ?", ("admin",))
+    if not cur.fetchone():
+        cur.execute(
+            "INSERT INTO users (username, password, balance) VALUES (?, ?, ?)",
+            ("admin", "123", 999999),
+        )
+
+    # 从 coupons.json 导入卡密（如果文件存在且表为空）
+    cur.execute("SELECT COUNT(*) AS c FROM coupons")
+    if cur.fetchone()["c"] == 0 and os.path.exists("coupons.json"):
+        with open("coupons.json", "r", encoding="utf-8") as f:
+            coupons_data = json.load(f)
+        for code, info in coupons_data.items():
+            cur.execute(
+                """
+                INSERT OR REPLACE INTO coupons (code, words, status, used_by, used_time)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    code,
+                    int(info.get("words", 0)),
+                    info.get("status", "unused"),
+                    info.get("used_by"),
+                    info.get("used_time"),
+                ),
+            )
+
+    conn.commit()
+    conn.close()
+
 
 def load_users():
+    """从 SQLite 读取所有用户为 DataFrame"""
     conn = get_db_connection()
-    # 强制读取 Sheet1
-    df = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0)
-    # 类型清洗
-    df['username'] = df['username'].astype(str).str.replace(r'\.0$', '', regex=True)
-    df['password'] = df['password'].astype(str).str.replace(r'\.0$', '', regex=True)
-    df['balance'] = pd.to_numeric(df['balance'], errors='coerce').fillna(0)
+    df = pd.read_sql_query("SELECT username, password, balance FROM users", conn)
+    conn.close()
+    df["balance"] = pd.to_numeric(df["balance"], errors="coerce").fillna(0)
     return df
 
-def sync_user_to_cloud(updated_df):
-    conn = get_db_connection()
-    conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=updated_df)
 
-# --- 3. 核心功能：卡密充值逻辑 (修复版) ---
 def redeem_code(username, code_input):
-    """验证卡密并充值"""
+    """验证卡密并充值（SQLite 版），并记录充值日志"""
     conn = get_db_connection()
+    cur = conn.cursor()
+
     try:
-        # 1. 读取卡密表
-        # ⚠️ 如果报错 "WorksheetNotFound"，请检查 Google 表格里是否真的新建了 "RedemptionCodes" 标签页
-        codes_df = conn.read(spreadsheet=SHEET_URL, worksheet="RedemptionCodes", ttl=0)
-        
-        # --- 🛠️ 关键修复开始：清洗数据 ---
-        # 强制把 'code' 列转为字符串，并切掉 .0
-        codes_df['code'] = codes_df['code'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-        # 强制把 'status' 列转为字符串并去空格
-        codes_df['status'] = codes_df['status'].astype(str).str.strip()
-        # --- 🛠️ 关键修复结束 ---
-        
-        # 2. 查找卡密
-        code_input = code_input.strip() # 清理用户输入的空格
-        
-        # 打印调试信息 (如果还不行，把下面这行取消注释，看看后台打印了什么)
-        # print(f"用户输入: {code_input}, 表格数据: {codes_df['code'].tolist()}")
-        
-        mask = (codes_df['code'] == code_input) & (codes_df['status'] == 'unused')
-        
-        if not codes_df[mask].empty:
-            # 找到有效卡密
-            idx = codes_df[mask].index[0]
-            
-            # 读取面值 (防止数字读取错误)
-            add_words = int(float(codes_df.at[idx, 'words']))
-            
-            # 3. 更新卡密状态为已使用
-            codes_df.at[idx, 'status'] = 'used'
-            codes_df.at[idx, 'used_by'] = username
-            codes_df.at[idx, 'used_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            conn.update(spreadsheet=SHEET_URL, worksheet="RedemptionCodes", data=codes_df)
-            
-            # 4. 更新用户余额
-            users_df = load_users()
-            user_idx = users_df[users_df['username'] == username].index[0]
-            
-            # 计算新余额
-            current_bal = float(users_df.at[user_idx, 'balance'])
-            new_bal = current_bal + add_words
-            
-            users_df.at[user_idx, 'balance'] = new_bal
-            sync_user_to_cloud(users_df)
-            
-            # 5. 更新 Session
-            st.session_state['balance'] = new_bal
-            return True, add_words
-        else:
+        code_input = code_input.strip()
+
+        # 1. 查找未使用的卡密
+        cur.execute(
+            "SELECT code, words, status FROM coupons WHERE code = ? AND status = 'unused'",
+            (code_input,),
+        )
+        row = cur.fetchone()
+
+        if not row:
             return False, "卡密无效、已被使用或不存在"
-            
+
+        add_words = int(row["words"])
+
+        # 2. 获取充值前余额
+        cur.execute("SELECT balance FROM users WHERE username = ?", (username,))
+        user_row = cur.fetchone()
+        balance_before = int(user_row["balance"]) if user_row else 0
+
+        # 3. 标记卡密为已使用
+        used_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cur.execute(
+            """
+            UPDATE coupons
+            SET status = 'used', used_by = ?, used_time = ?
+            WHERE code = ?
+            """,
+            (username, used_time, code_input),
+        )
+
+        # 4. 更新用户余额
+        cur.execute(
+            "UPDATE users SET balance = balance + ? WHERE username = ?",
+            (add_words, username),
+        )
+
+        # 5. 读取最新余额
+        cur.execute(
+            "SELECT balance FROM users WHERE username = ?",
+            (username,),
+        )
+        user_row = cur.fetchone()
+        balance_after = int(user_row["balance"]) if user_row else 0
+
+        # 6. 记录充值日志
+        cur.execute(
+            """
+            INSERT INTO recharge_logs (username, code, words_added, balance_before, balance_after, recharge_time)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (username, code_input, add_words, balance_before, balance_after, used_time),
+        )
+
+        conn.commit()
+        st.session_state["balance"] = balance_after
+        return True, add_words
+
     except Exception as e:
+        conn.rollback()
         return False, f"系统错误: {e}"
+    finally:
+        conn.close()
+
+
+def export_db_to_json() -> str:
+    """导出当前 SQLite 数据为 JSON 字符串"""
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # 导出用户
+    cur.execute("SELECT username, password, balance FROM users")
+    users = {}
+    for row in cur.fetchall():
+        users[row["username"]] = {
+            "password": row["password"],
+            "balance": int(row["balance"]),
+        }
+
+    # 导出卡密
+    cur.execute("SELECT code, words, status, used_by, used_time FROM coupons")
+    coupons = {}
+    for row in cur.fetchall():
+        coupons[row["code"]] = {
+            "words": int(row["words"]),
+            "status": row["status"],
+            "used_by": row["used_by"],
+            "used_time": row["used_time"],
+        }
+
+    conn.close()
+
+    data = {
+        "users": users,
+        "coupons": coupons,
+    }
+    return json.dumps(data, ensure_ascii=False, indent=2)
 
 # --- 4. 界面函数：登录页 (带海报版) ---
 # --- 4. 界面函数：登录页 (带海报版) ---
@@ -192,7 +357,7 @@ def login_page():
                         Paper Killer
                     </h1>
                     <p style="margin: 5px 0 0 0; color: #ff4b4b; font-size: 14px;font-weight: bold">
-                        ✨作业狗AI降重助手
+                        ✨作业狗AI降AI助手
                     </p>
                 </div>
             """, unsafe_allow_html=True)
@@ -213,19 +378,38 @@ def login_page():
             if st.button("🚀 登录工作台", use_container_width=True, type="primary"):
                 if u and p:
                     try:
-                        df = load_users()
-                        user = df[(df['username'] == u) & (df['password'] == p)]
-                        if not user.empty:
+                        # 使用 SQLite 校验用户
+                        conn = get_db_connection()
+                        cur = conn.cursor()
+                        cur.execute(
+                            "SELECT username, balance FROM users WHERE username = ? AND password = ?",
+                            (u, p),
+                        )
+                        row = cur.fetchone()
+                        conn.close()
+
+                        if row:
                             st.session_state['logged_in'] = True
-                            st.session_state['username'] = u
-                            st.session_state['balance'] = float(user.iloc[0]['balance'])
+                            st.session_state['username'] = row["username"]
+                            st.session_state['balance'] = float(row["balance"])
                             st.toast("登录成功！", icon="🎉")
                             time.sleep(0.5)
                             st.rerun()
                         else:
                             st.error("❌ 账号或密码错误")
                     except Exception as e:
-                        st.error(f"连接失败: {e}")
+                        st.error(f"本地数据库错误: {e}")
+                        # 调试信息：显示数据库中的用户
+                        try:
+                            conn_debug = get_db_connection()
+                            cur_debug = conn_debug.cursor()
+                            cur_debug.execute("SELECT username, password FROM users")
+                            users_list = cur_debug.fetchall()
+                            conn_debug.close()
+                            if users_list:
+                                st.info(f"数据库中的用户: {', '.join([row[0] for row in users_list])}")
+                        except:
+                            pass
 
         with tab2:
             ru = st.text_input("设置用户名", key="r_u", placeholder="建议使用字母或数字")
@@ -235,12 +419,20 @@ def login_page():
             if st.button("✨ 立即注册 (领200字)", use_container_width=True):
                 if ru and rp:
                     try:
-                        df = load_users()
-                        if ru in df['username'].values:
+                        conn = get_db_connection()
+                        cur = conn.cursor()
+                        # 检查是否存在
+                        cur.execute("SELECT 1 FROM users WHERE username = ?", (ru,))
+                        if cur.fetchone():
+                            conn.close()
                             st.error("⚠️ 用户名已存在")
                         else:
-                            new_row = pd.DataFrame([{"username": ru, "password": rp, "balance": 200}])
-                            sync_user_to_cloud(pd.concat([df, new_row], ignore_index=True))
+                            cur.execute(
+                                "INSERT INTO users (username, password, balance) VALUES (?, ?, ?)",
+                                (ru, rp, 200),
+                            )
+                            conn.commit()
+                            conn.close()
                             st.balloons()
                             st.success("✅ 注册成功！请切换到登录页。")
                     except Exception as e:
@@ -263,16 +455,29 @@ def main_app():
         st.metric("剩余字数", f"{int(balance)} 字")
         
         st.divider()
-        menu = st.radio("功能导航", ["📝 论文降重", "💎 充值中心", "👤 个人中心"])
+        
+        # 根据用户身份显示菜单
+        is_admin = st.session_state.get('username') == 'admin'
+        if is_admin:
+            menu = st.radio("功能导航", ["📝 论文降AI", "💎 充值中心", "👤 个人中心", "⚙️ 管理员功能"])
+        else:
+            menu = st.radio("功能导航", ["📝 论文降AI", "💎 充值中心", "👤 个人中心"])
         
         if st.button("退出登录"):
             st.session_state['logged_in'] = False
             st.rerun()
 
     # 右侧主界面
-    if menu == "📝 论文降重":
-        st.header("📝 降重工作台")
-        st.info("💡 提示：作业狗正在挥汗加速中...")
+    if menu == "📝 论文降AI":
+        st.header("📝 降AI工作台")
+        
+        # 显示当前使用的模型
+        model_display = {
+            'qwen-turbo': '🚀 快速版',
+            'qwen-plus': '⚡ 平衡版',
+            'qwen-max': '🔥 最强版'
+        }
+        st.info(f"💡作业狗正在加速中，请耐心等待...")
         
         # 定义单次限制
         MAX_ONCE_LIMIT = 5000
@@ -280,7 +485,7 @@ def main_app():
         col1, col2 = st.columns([1, 1])
         with col1:
             # 左侧：输入框
-            text_input = st.text_area("请输入需要降重的文本", height=400, placeholder="在此粘贴您的论文段落...")
+            text_input = st.text_area("请输入需要降AI的文本", height=400, placeholder="在此粘贴您的文本段落...")
             word_count = len(text_input)
             
             # 左侧底部：字数统计
@@ -298,7 +503,7 @@ def main_app():
             
             # 3. 将标题 "降重结果预览" 直接作为 text_area 的 label 参数
             # 这样左右两边的标题高度就完全一样了
-            result_area.text_area("降重结果预览", height=400, disabled=True, placeholder="结果将显示在这里...")
+            result_area.text_area("降AI结果预览", height=400, disabled=True, placeholder="结果将显示在这里...")
             
             # 4. 【关键】加一个空的 caption，为了和左边的“字数统计”对齐底部高度
             st.caption(" ")
@@ -307,7 +512,7 @@ def main_app():
         st.divider()
         btn_col1, btn_col2 = st.columns([3, 1])
         with btn_col2:
-            if st.button("🚀 开始降重 (扣除字数)", type="primary", use_container_width=True):
+            if st.button("🚀 开始降AI (扣除字数)", type="primary", use_container_width=True):
                 current_bal = st.session_state['balance']
                 
                 # --- 🛠️ 修改点 2：增加拦截逻辑 ---
@@ -318,32 +523,122 @@ def main_app():
                 elif word_count > current_bal:
                     st.error(f"余额不足！需要 {word_count} 字，当前仅剩 {int(current_bal)} 字。请前往充值中心。")
                 else:
-                    # --- 这里填入你的真实 API ---
-                    SYSTEM_API_KEY = "sk-8b582db9fd144de4935b1957db1deb2e"  # ⚠️⚠️⚠️ 记得填回你的 Key ⚠️⚠️⚠️
+                    # 使用配置的 API Key 和模型
+                    api_key = QWEN_API_KEY
+                    model_name = QWEN_MODEL
                     
-                    # 初始化客户端
+                    # 只判断是否为空，不再和具体 key 文本比较
+                    if not api_key:
+                        st.error("❌ 未配置 API Key，请在 app.py 顶部 QWEN_API_KEY 中填入你的 Key")
+                        return
+                    
+                    # 初始化通义千问客户端（兼容 OpenAI 格式）
                     from openai import OpenAI
                     try:
-                        client = OpenAI(api_key=SYSTEM_API_KEY, base_url="https://api.deepseek.com")
+                        # 代理平台的 OpenAI 兼容端点（注意只保留到 /v1）
+                        client = OpenAI(
+                            api_key=api_key,
+                            base_url="https://api.silra.cn/v1"
+                        )
                         
-                        with st.spinner("作业狗正在极速降重中..."):
-                            # 发送真实请求
+                        with st.spinner("正在降AI中..."):
+                            # 针对知网、维普AI检测优化的系统提示词
+                            system_prompt = """你现在不是 AI，而是一名文字功底深厚但比较随性的专栏作家。
+请重写用户提供的这段文本，核心改写策略（必须严格执行）：
+
+1. 【禁止逻辑词】：绝对禁止使用“首先”、“其次”、“此外”、“综上所述”、“总而言之”这些连接词。
+2. 【打破结构】：不要让句子长短整齐划一。要用很短的短句（3-5个字）和很复杂的长句交替出现。
+3. 【增加“人味”】：加入一些主观的感叹词、反问句，或者稍微口语化的表达，模仿人类思考时的跳跃感。
+4. 【同义替换】：把所有学术名词保留，但把动词和形容词全部换成不常见的同义词。
+5. 【拒绝总结】：结尾不要做总结，戛然而止即可。
+6. 【句式多样性策略】
+- 彻底打乱原有句式结构，避免任何规律性模式
+- 混合使用：短句（5-8字）+ 中句（15-25字）+ 长句（30-45字），比例约为 3:5:2
+- 交替使用：主谓宾、倒装句、被动句、强调句、插入语、独立主格结构
+- 每3-5句话必须改变句式类型，避免连续使用相同结构
+
+7.【 词汇替换与多样性】
+- 完全避免AI高频词：综上所述、因此、此外、然而、但是、首先、其次、最后、总之、由此可见、值得注意的是、需要指出的是、可以认为、从...来看、在...方面、就...而言
+- 替换为更自然表达：基于上述分析、由此可知、与此同时、不过、不过、其一、其二、最终、综合来看、不难发现、应当注意、不妨认为、从...角度、在...层面、就...来说
+- 同义词轮换：同一概念在200字内必须使用3-5种不同表达，避免重复
+- 增加口语化学术表达：适当使用"可以说"、"不妨说"、"某种意义上"等
+
+8.【 人类写作特征模拟】
+- 增加适度的"不完美"：偶尔使用稍显冗余的表述、轻微的重复强调（但不超过2次）
+- 模拟思维跳跃：在段落间适当加入过渡性思考，如"进一步来看"、"换个角度"、"深入分析"
+- 增加个人化表达：适度使用"笔者认为"、"本文认为"、"本研究"等，但不要过度
+- 引入适度的不确定性：使用"可能"、"或许"、"在一定程度上"等模糊化表达
+
+9.【 逻辑连贯性优化】
+- 避免过于完美的逻辑链条，适当加入"虽然...但是"、"尽管...然而"等转折
+- 段落间使用多样化的过渡词：不仅...而且、一方面...另一方面、既...又、不仅...还
+- 避免"首先-其次-最后"的机械式结构，改用"其一-其二-其三"或直接分段论述
+
+10.【 语言风格调整】
+- 避免过于正式和刻板的学术语言，适当融入更自然的表达
+- 增加具体例证和细节描述，减少抽象概括
+- 使用更多具体动词，减少"进行"、"开展"、"实施"等万能动词
+- 适当使用比喻、类比等修辞手法（学术范围内）
+
+11.【 文本结构重组】
+- 彻底重组段落结构，但保持核心论点不变
+- 将长段落拆分为2-3个短段落，或将短段落合并（但要自然）
+- 调整句子顺序，但保持逻辑关系清晰
+- 在适当位置增加解释性语句，丰富内容
+
+12.【知网/维普特定优化】
+- 避免使用过于新颖的网络用语或流行语
+- 保持学术规范，但语言要自然流畅
+- 适当使用专业术语的同义表达，避免单一术语重复
+- 增加文献引用风格的多样性（如果原文有引用）
+
+【8. 输出要求】
+- 直接输出改写后的完整文本，不要任何解释或说明
+- 保持原文的核心观点、数据和结论完全一致
+- 字数应与原文相近（±5%范围内）
+- 确保改写后的文本读起来自然流畅，像人类学者手写的一样
+
+现在请开始改写用户提供的文本。"""
+
+                            # 发送真实请求到通义千问（优化参数以提升降重效果）
                             resp = client.chat.completions.create(
-                                model="deepseek-chat",
+                                model=model_name,  # 使用通义千问模型
                                 messages=[
-                                    {"role": "system", "content": "你是一个学术降重专家，请重写用户文本，目的是大幅降低AIGC检测率，规避 AI 检测。要求：1. 彻底打破原有句式结构，多用倒装、插入语。2. 替换所有AI高频词（如'综上所述'、'这一点'）。3. 模拟人类写作的离散度（Burstiness）。4. 增加语句结构的复杂度，混合使用倒装句、强调句。5. 替换常见的 AI 惯用词（如‘显著地’、‘此外’）为更地道的学术表达。6. 引入适度的‘困惑度’（Perplexity），模拟人类思维的非线性跳跃。7. 保持原文愿意不变，核心逻辑不变，但彻底重组句式。请直接输出修改后的文本，不要废话。"},
+                                    {"role": "system", "content": system_prompt},
                                     {"role": "user", "content": text_input}
-                                ]
+                                ],
+                                temperature=0.9,  # 提高温度值，增加随机性和多样性（通义千问支持更高温度）
+                                top_p=0.95,  # 核采样参数，增加词汇多样性
+                                # 注意：通义千问可能不支持frequency_penalty和presence_penalty，先注释掉
+                                # frequency_penalty=0.3,  # 频率惩罚，减少重复
+                                # presence_penalty=0.3,  # 存在惩罚，鼓励使用新词汇
                             )
                             # 获取结果
                             real_result = resp.choices[0].message.content
                             
-                            # 扣费逻辑
-                            df = load_users()
-                            idx = df[df['username'] == st.session_state['username']].index[0]
-                            new_bal = current_bal - word_count
-                            df.at[idx, 'balance'] = new_bal
-                            sync_user_to_cloud(df)
+                            # 扣费逻辑：SQLite 版，并记录使用日志
+                            try:
+                                conn = get_db_connection()
+                                cur = conn.cursor()
+                                new_bal = current_bal - word_count
+                                cur.execute(
+                                    "UPDATE users SET balance = ? WHERE username = ?",
+                                    (int(new_bal), st.session_state['username']),
+                                )
+                                # 记录使用日志
+                                operation_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                cur.execute(
+                                    """
+                                    INSERT INTO usage_logs (username, words_used, operation_time, operation_type)
+                                    VALUES (?, ?, ?, ?)
+                                    """,
+                                    (st.session_state['username'], word_count, operation_time, '降重'),
+                                )
+                                conn.commit()
+                                conn.close()
+                            except Exception as db_e:
+                                st.error(f"扣费失败: {db_e}")
+                                return
                             
                             # 更新 Session 和界面
                             st.session_state['balance'] = new_bal
@@ -351,7 +646,16 @@ def main_app():
                             st.success(f"成功！消耗 {word_count} 字")
                             
                     except Exception as e:
-                        st.error(f"运行出错: {e}")
+                        error_msg = str(e)
+                        if "api_key" in error_msg.lower() or "unauthorized" in error_msg.lower():
+                            st.error("❌ API Key 无效或已过期，请检查您的通义千问 API Key")
+                        elif "quota" in error_msg.lower() or "limit" in error_msg.lower():
+                            st.error("❌ API 调用额度不足，请检查您的账户余额")
+                        elif "model" in error_msg.lower():
+                            st.error("❌ 模型名称错误，请检查模型选择")
+                        else:
+                            st.error(f"❌ 运行出错: {error_msg}")
+                            st.info("💡 提示：请确保已正确输入通义千问 API Key，并检查网络连接")
 
     elif menu == "💎 充值中心":
         st.header("💎 会员充值中心")
@@ -408,9 +712,221 @@ def main_app():
         st.header("个人档案")
         st.write(f"当前用户: {st.session_state['username']}")
         st.write(f"当前余额: {st.session_state['balance']} 字")
-        st.info("更多功能开发中...")
+        
+        # 使用记录
+        st.subheader("📊 使用记录")
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT words_used, operation_time, operation_type 
+            FROM usage_logs 
+            WHERE username = ? 
+            ORDER BY operation_time DESC 
+            LIMIT 20
+            """,
+            (st.session_state['username'],),
+        )
+        usage_records = cur.fetchall()
+        if usage_records:
+            usage_df = pd.DataFrame([
+                {
+                    "时间": row["operation_time"],
+                    "消耗字数": row["words_used"],
+                    "操作类型": row["operation_type"]
+                }
+                for row in usage_records
+            ])
+            st.dataframe(usage_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("暂无使用记录")
+        
+        # 充值记录
+        st.subheader("💰 充值记录")
+        cur.execute(
+            """
+            SELECT code, words_added, balance_before, balance_after, recharge_time 
+            FROM recharge_logs 
+            WHERE username = ? 
+            ORDER BY recharge_time DESC 
+            LIMIT 20
+            """,
+            (st.session_state['username'],),
+        )
+        recharge_records = cur.fetchall()
+        if recharge_records:
+            recharge_df = pd.DataFrame([
+                {
+                    "时间": row["recharge_time"],
+                    "卡密": row["code"],
+                    "充值字数": row["words_added"],
+                    "充值前余额": row["balance_before"],
+                    "充值后余额": row["balance_after"]
+                }
+                for row in recharge_records
+            ])
+            st.dataframe(recharge_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("暂无充值记录")
+        
+        conn.close()
+        
+        st.divider()
+        st.subheader("数据备份 / 导出")
+        backup_json = export_db_to_json()
+        backup_file_name = f"paper_killer_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        st.download_button(
+            "📤 导出数据库为 JSON",
+            data=backup_json,
+            file_name=backup_file_name,
+            mime="application/json",
+            use_container_width=True,
+        )
+    
+    elif menu == "⚙️ 管理员功能":
+        st.header("⚙️ 管理员功能")
+        
+        if st.session_state.get('username') != 'admin':
+            st.error("❌ 仅管理员可访问此功能")
+            return
+        
+        # 卡密生成功能
+        st.subheader("🎫 生成卡密")
+        
+        col_gen1, col_gen2 = st.columns([1, 1])
+        with col_gen1:
+            card_type = st.selectbox(
+                "选择卡密类型",
+                ["1000字 (¥3)", "2000字 (¥5)", "5000字 (¥12)", "10000字 (¥22)", "20000字 (¥40)"]
+            )
+            words_map = {
+                "1000字 (¥3)": 1000,
+                "2000字 (¥5)": 2000,
+                "5000字 (¥12)": 5000,
+                "10000字 (¥22)": 10000,
+                "20000字 (¥40)": 20000
+            }
+            words_value = words_map[card_type]
+        
+        with col_gen2:
+            count = st.number_input("生成数量", min_value=1, max_value=100, value=10, step=1)
+        
+        if st.button("🚀 生成卡密", type="primary", use_container_width=True):
+            import random
+            import string
+            
+            def generate_code(prefix):
+                """生成类似 '1000-ABCD1234EF' 的卡密"""
+                suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=10))
+                return f"{prefix}-{suffix}"
+            
+            conn = get_db_connection()
+            cur = conn.cursor()
+            
+            generated_codes = []
+            for _ in range(count):
+                code = generate_code(str(words_value))
+                try:
+                    cur.execute(
+                        """
+                        INSERT INTO coupons (code, words, status, used_by, used_time)
+                        VALUES (?, ?, 'unused', NULL, NULL)
+                        """,
+                        (code, words_value),
+                    )
+                    generated_codes.append(code)
+                except sqlite3.IntegrityError:
+                    # 如果卡密已存在，重新生成
+                    continue
+            
+            conn.commit()
+            conn.close()
+            
+            if generated_codes:
+                st.success(f"✅ 成功生成 {len(generated_codes)} 张卡密！")
+                st.code("\n".join(generated_codes), language=None)
+                
+                # 提供下载
+                codes_text = "\n".join(generated_codes)
+                st.download_button(
+                    "📥 下载卡密列表",
+                    data=codes_text,
+                    file_name=f"coupons_{words_value}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                    mime="text/plain",
+                    use_container_width=True,
+                )
+            else:
+                st.error("生成失败，请重试")
+        
+        st.divider()
+        
+        # 用户管理
+        st.subheader("👥 用户管理")
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT username, password, balance FROM users ORDER BY username")
+        all_users = cur.fetchall()
+        if all_users:
+            users_df = pd.DataFrame([
+                {
+                    "用户名": row["username"],
+                    "密码": row["password"],
+                    "余额": row["balance"]
+                }
+                for row in all_users
+            ])
+            st.dataframe(users_df, use_container_width=True, hide_index=True)
+            
+            # 重置 admin 账号按钮
+            if st.button("🔄 重置 Admin 账号", use_container_width=True):
+                cur.execute(
+                    "UPDATE users SET password = ?, balance = ? WHERE username = ?",
+                    ("123", 999999, "admin"),
+                )
+                # 如果 admin 不存在，则插入
+                if cur.rowcount == 0:
+                    cur.execute(
+                        "INSERT INTO users (username, password, balance) VALUES (?, ?, ?)",
+                        ("admin", "123", 999999),
+                    )
+                conn.commit()
+                st.success("✅ Admin 账号已重置！用户名: admin, 密码: 123")
+                st.rerun()
+        conn.close()
+        
+        st.divider()
+        
+        # 卡密统计
+        st.subheader("📈 卡密统计")
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # 统计各类型卡密
+        cur.execute("""
+            SELECT words, status, COUNT(*) as count 
+            FROM coupons 
+            GROUP BY words, status
+            ORDER BY words, status
+        """)
+        stats = cur.fetchall()
+        
+        if stats:
+            stats_df = pd.DataFrame([
+                {
+                    "面值": f"{row['words']} 字",
+                    "状态": "已使用" if row['status'] == 'used' else "未使用",
+                    "数量": row['count']
+                }
+                for row in stats
+            ])
+            st.dataframe(stats_df, use_container_width=True, hide_index=True)
+        
+        conn.close()
 
 # --- 6. 主入口 ---
+# 初始化数据库（只需在程序加载时运行一次）
+init_db()
+
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
 
